@@ -50,6 +50,8 @@ Use `patch.crates-io.mozjs.path="/path/to/servo-quickjs/mozjs"` for a local chec
 
 `QJS_GC_STATS` prints live objects, roots and retaining paths after each GC (see `mozjs/src/engine/runtime.rs`).
 
+A build with `QJS_POOL_STATS=1` records which API functions put values in the autorelease pool, and whether a root took them before it drained; `tools/pool_stats.py` summarizes the output (see `mozjs/src/engine/pool_stats.rs`, `just test-pool-stats`).
+
 ## License
 
 - `mozjs`, `gen-bindings`, `fuzz` and `tools`: [MPL-2.0](LICENSE-MPL). Much of `mozjs` is copied from [servo/mozjs](https://github.com/servo/mozjs), under the same license.

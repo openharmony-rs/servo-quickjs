@@ -50,7 +50,7 @@ Why the pool is safe:
 - Under the pool, every value Rust has touched lives until the task ends.
 - So any code that is correct under SM is also correct here.
 
-The cost is memory: values stay alive until the end of the task.
+The cost is memory: values stay alive until the end of the task. A build with `QJS_POOL_STATS=1` measures what the pool holds, by API function and by what became of each value (`engine/pool_stats.rs`, `tools/pool_stats.py`).
 
 **Runtime teardown.** Servo destroys the runtime while Rust still holds counts (`ScriptThread` fields, `Trusted` entries). As in SpiderMonkey, destroying it frees every object (patch Q11) and every realm (Q15) and runs their finalizers; afterwards `Heap` barriers and `release_object` do nothing, and Servo's `Dom::drop` checks `js::quickjs::runtime_alive()` before touching the reflector. Leak hunting uses the `dump-leaks` feature, which reports those objects instead of freeing them.
 

@@ -60,6 +60,9 @@ pub(crate) unsafe fn JS_DestroyContext(cx: *mut root::JSContext) {
     q::JS_FreeRuntime(cx.rt);
     super::realm::forget_leaked_realms();
     set_current(ptr::null_mut());
+    // After the finalizers that `JS_FreeRuntime` runs, which still release values into the pool.
+    #[cfg(qjs_pool_stats)]
+    super::pool_stats::report();
     super::verify::reset();
 }
 

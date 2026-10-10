@@ -20,6 +20,11 @@ fn main() {
             .expect("failed to run python3");
         assert!(status.success(), "stub_bindings.py failed for {name}");
     }
+    println!("cargo:rustc-check-cfg=cfg(qjs_pool_stats)");
+    if std::env::var("QJS_POOL_STATS").is_ok_and(|v| !v.is_empty() && v != "0") {
+        println!("cargo:rustc-cfg=qjs_pool_stats");
+    }
+    println!("cargo:rerun-if-env-changed=QJS_POOL_STATS");
     println!("cargo:rerun-if-changed=stub_bindings.py");
     println!("cargo:rerun-if-changed=upstream-bindgen");
     println!("cargo:rerun-if-changed=src/engine");

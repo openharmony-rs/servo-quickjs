@@ -31,6 +31,8 @@ mod intrinsics;
 mod misc;
 mod module;
 mod object;
+#[cfg(qjs_pool_stats)]
+pub(crate) mod pool_stats;
 mod promise;
 mod property;
 mod proxy;
@@ -126,17 +128,29 @@ impl Cx {
 
     /// Keeps `v` alive until the pool is drained (end of task), and returns it. Ropes are
     /// flattened, so values Rust sees never carry `JS_TAG_STRING_ROPE`.
+    #[cfg_attr(qjs_pool_stats, track_caller)]
     pub fn retain(&mut self, v: JSVal) -> JSVal {
+        self.retain_as(v, Pooled::Borrowed)
+    }
+
+    #[cfg_attr(qjs_pool_stats, track_caller)]
+    fn retain_as(&mut self, v: JSVal, pooled: Pooled) -> JSVal {
         let qv = v.to_qjs();
         if !qv.has_ref_count() {
             return v;
         }
         let qv = unsafe { q::JS_DupValueRT(self.rt, qv) };
-        self.adopt(qv)
+        self.adopt_as(qv, pooled)
     }
 
     /// Like `retain`, but takes over a reference the caller owns (e.g. a QuickJS API result).
+    #[cfg_attr(qjs_pool_stats, track_caller)]
     pub fn adopt(&mut self, qv: q::JSValue) -> JSVal {
+        self.adopt_as(qv, Pooled::Result)
+    }
+
+    #[cfg_attr(qjs_pool_stats, track_caller)]
+    fn adopt_as(&mut self, qv: q::JSValue, pooled: Pooled) -> JSVal {
         if !qv.has_ref_count() {
             return JSVal::from_qjs(qv);
         }
@@ -147,9 +161,18 @@ impl Cx {
         } else {
             qv
         };
+        self.push_pool(qv, pooled);
+        JSVal::from_qjs(qv)
+    }
+
+    /// Takes over a reference to `qv` until the pool is drained.
+    #[cfg_attr(qjs_pool_stats, track_caller)]
+    #[cfg_attr(not(qjs_pool_stats), allow(unused_variables))]
+    fn push_pool(&mut self, qv: q::JSValue, pooled: Pooled) {
         self.pool.push(qv);
         verify::pooled(qv, 1);
-        JSVal::from_qjs(qv)
+        #[cfg(qjs_pool_stats)]
+        pool_stats::pushed(qv, pooled, std::panic::Location::caller());
     }
 
     pub fn adopt_atom(&mut self, atom: q::JSAtom) -> q::JSAtom {
@@ -161,6 +184,8 @@ impl Cx {
     pub fn drain_pool(&mut self, mark: (usize, usize)) {
         while self.pool.len() > mark.0 {
             let v = self.pool.pop().unwrap();
+            #[cfg(qjs_pool_stats)]
+            pool_stats::popped(v);
             verify::pooled(v, -1);
             unsafe { q::JS_FreeValueRT(self.rt, v) };
         }
@@ -237,7 +262,7 @@ pub(crate) unsafe fn retain_rooted(
     let cx = Cx::from_raw(cx);
     let ptr_tag = match kind {
         RootKind::Value => {
-            cx.retain(*(data as *const JSVal));
+            cx.retain_as(*(data as *const JSVal), Pooled::Root);
             return;
         }
         RootKind::Id => {
@@ -256,7 +281,7 @@ pub(crate) unsafe fn retain_rooted(
     };
     let p = *(data as *const *mut std::ffi::c_void);
     if !p.is_null() {
-        cx.retain(JSVal::from_qjs(q::JSValue::mkptr(ptr_tag, p)));
+        cx.retain_as(JSVal::from_qjs(q::JSValue::mkptr(ptr_tag, p)), Pooled::Root);
     }
 }
 
@@ -279,8 +304,7 @@ pub(crate) unsafe fn release_object(obj: *mut root::JSObject) {
         // borrow that the target's finalizer takes too). In a cycle collection, the object may
         // belong to the cycle being freed and must go with it.
         if q::JS_GetRefCount(v) == 1 && q::JS_IsCollectingCycles(cx.rt) == 0 {
-            verify::pooled(v, 1);
-            cx.pool.push(v);
+            cx.push_pool(v, Pooled::Deferred);
         } else {
             q::JS_FreeValueRT(cx.rt, v);
         }
@@ -290,6 +314,21 @@ pub(crate) unsafe fn release_object(obj: *mut root::JSObject) {
 pub(crate) fn drain_current_pool() {
     let cx = CURRENT.with(|c| c.get());
     if !cx.is_null() {
+        #[cfg(qjs_pool_stats)]
+        pool_stats::task_drained(unsafe { (*cx).pool.len() });
         unsafe { (*cx).drain_pool((0, 0)) };
     }
+}
+
+/// How a value entered the autorelease pool.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Pooled {
+    /// A reference an API function handed to Rust (`Cx::adopt`).
+    Result,
+    /// An extra count on a value that already had an owner (`Cx::retain`).
+    Borrowed,
+    /// The value of a `Rooted` or of a handle write.
+    Root,
+    /// A last release deferred to the drain (`release_object`).
+    Deferred,
 }

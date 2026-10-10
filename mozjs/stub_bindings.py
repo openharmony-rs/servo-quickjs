@@ -9,6 +9,7 @@ zeroed value.
 Usage: stub_bindings.py <bindgen.rs> <out.rs> [<engine-src-dir>]
 """
 
+import os
 import re
 import sys
 
@@ -96,6 +97,10 @@ STATIC_INIT = {
     "FalseHandleValue": handle_value(1, 0),
 }
 
+# Built with `QJS_POOL_STATS=1`: each forwarding stub records which API function is running, and
+# whether it returns a raw GC pointer (see `src/engine/pool_stats.rs`).
+POOL_STATS = os.environ.get("QJS_POOL_STATS", "") not in ("", "0")
+RAW_GC_POINTER = re.compile(r"->\s*\*mut\s+root::(JSObject|JSString|JSLinearString|JSFunction|JSScript|JS::BigInt|JS::Symbol)\b")
 LINK_NAME = re.compile(r'#\[link_name = "(?:[^"\\]|\\.)*"\]\s*')
 
 
@@ -114,7 +119,11 @@ def convert_item(item, indent, implemented, stats):
         # A name in both jsapi and glue (NewProxyObject) forwards only where the arity matches.
         if name in implemented and len(param_names(params)) in implemented[name]:
             args = ", ".join(param_names(params))
-            return f"{indent}{attrs.strip()}\n{indent}pub unsafe extern \"C\" fn {name}({params}){ret} {{ crate::engine::{name}({args}) }}\n"
+            body = f"crate::engine::{name}({args})"
+            if POOL_STATS:
+                raw = "true" if RAW_GC_POINTER.search(ret) else "false"
+                body = f"let _api = crate::engine::pool_stats::enter(\"{name}\", {raw}); {body}"
+            return f"{indent}{attrs.strip()}\n{indent}pub unsafe extern \"C\" fn {name}({params}){ret} {{ {body} }}\n"
         return f"{indent}{attrs.strip()}\n{indent}pub unsafe extern \"C\" fn {name}({params}){ret} {{ qjs_todo!(\"{name}\") }}\n"
     m = STATIC.match(text)
     if m:

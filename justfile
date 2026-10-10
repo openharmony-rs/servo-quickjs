@@ -21,6 +21,10 @@ test *args:
 test-verify *args:
     QJS_VERIFY_TRACING=1 CARGO_TARGET_DIR={{target}} cargo test -p mozjs {{args}} -- {{by_design}}
 
+# Run the tests with autorelease pool statistics (`engine/pool_stats.rs`), in a separate target dir.
+test-pool-stats *args:
+    QJS_POOL_STATS=1 CARGO_TARGET_DIR={{target}}/pool-stats cargo test -p mozjs {{args}} -- {{by_design}}
+
 # Run the tests under ASan and LSan, QuickJS's C code included; `tools/lsan.supp` lists the leaks that are by design.
 test-asan *args:
     CC={{clang}} CFLAGS=-fsanitize=address RUSTFLAGS="-Zsanitizer=address -C force-frame-pointers=yes" LSAN_OPTIONS=suppressions={{justfile_directory()}}/tools/lsan.supp CARGO_TARGET_DIR={{target}}/asan cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu -p mozjs {{args}} -- {{by_design}}

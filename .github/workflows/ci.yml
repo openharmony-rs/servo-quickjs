@@ -39,6 +39,8 @@ jobs:
         run: just test
       - name: Tests with the tracing verifier
         run: just test-verify
+      - name: Tests with autorelease pool statistics
+        run: just test-pool-stats --test qjs_pool_stats
 
   asan:
     runs-on: ubuntu-24.04

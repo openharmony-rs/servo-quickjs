@@ -40,6 +40,13 @@ pub fn drain_autorelease_pool() {
     crate::engine::drain_current_pool()
 }
 
+/// The autorelease pool statistics of this thread's runtime as JSON (built with
+/// `QJS_POOL_STATS=1`, see `engine/pool_stats.rs`).
+#[cfg(qjs_pool_stats)]
+pub fn pool_stats_json() -> String {
+    crate::engine::pool_stats::json(false)
+}
+
 /// The number of values currently kept alive by the autorelease pool.
 pub fn autorelease_pool_len() -> usize {
     crate::engine::current().pool.len()
