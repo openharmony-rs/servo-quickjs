@@ -15,7 +15,9 @@ use mozjs::context::{JSContext, RawJSContext};
 use mozjs::glue::{CreateJobQueue, DeleteJobQueue, JobQueueTraps};
 use mozjs::jsapi::{self, Handle, JSObject, OnNewGlobalHookOption, Value};
 use mozjs::jsval::{ObjectValue, UndefinedValue};
-use mozjs::quickjs::{autorelease_pool_len, drain_autorelease_pool, sys as qjs};
+use mozjs::quickjs::{
+    autorelease_pool_len, drain_autorelease_pool, sys as qjs, AutoreleasePoolScope,
+};
 use mozjs::realm::AutoRealm;
 use mozjs::rust::wrappers2::{JS_NewGlobalObject, JS_NewPlainObject};
 use mozjs::rust::{
@@ -120,10 +122,11 @@ fn rooted_rc_whose_sharing_changes() {
     });
 }
 
-/// Servo's checkpoint loop, reduced to running the JS microtasks.
+/// Servo's checkpoint loop, reduced to running the JS microtasks, with a scope per microtask.
 unsafe extern "C" fn run_jobs(cx: *mut RawJSContext) {
+    rooted!(in(cx) let mut task = UndefinedValue());
     while jsapi::HasAnyMicroTasks(cx) {
-        rooted!(in(cx) let mut task = UndefinedValue());
+        let _scope = AutoreleasePoolScope::new();
         mozjs::glue::JS_DequeueNextMicroTask(cx, task.handle_mut().into());
         let task = jsapi::ToMaybeWrappedJSMicroTask(&*task);
         assert!(jsapi::RunJSMicroTask(

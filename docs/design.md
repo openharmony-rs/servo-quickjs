@@ -26,7 +26,7 @@ Rule: anything that can outlive the current task holds a reference count; anythi
 | mozjs / Servo type | QuickJS semantics |
 |---|---|
 | Raw `JSVal`, `*mut JSObject`, `Handle`, `MutableHandle` | Not owning. |
-| Values the shim returns to Rust (results, out-params), and `Rooted`/`rooted!` initialisation | Dup the value into the **autorelease pool**. Servo drains the pool between tasks: in `ScriptThread::start`, and at the start of each `run_worker_event_loop` call. Each call from QuickJS into Rust (`call_native`, proxy traps) also drains back to its entry mark when it returns, like SpiderMonkey roots dying with the native's frame, so loops calling natives don't grow the pool. |
+| Values the shim returns to Rust (results, out-params), and `Rooted`/`rooted!` initialisation | Dup the value into the **autorelease pool**. Servo drains the pool between tasks: in `ScriptThread::start`, and at the start of each `run_worker_event_loop` call. Each call from QuickJS into Rust (`call_native`, proxy traps) also drains back to its entry mark when it returns, like SpiderMonkey roots dying with the native's frame, so loops calling natives don't grow the pool. So do the promise hooks that call the embedder's incumbent-global trap (patch Q32's, and `enqueue_microtask`), so `then()` and `await` don't add an entry each. Servo (`js-quickjs`) opens an `AutoreleasePoolScope` for each microtask of a checkpoint, so a long chain of microtasks in one task doesn't keep every finished job alive; this is safe because roots hold no references and the loop's roots are written before they are read in each iteration, and what a job leaves for later is counted (`Heap`, `Dom<T>`). Roots therefore rely on the pool, and SpiderMonkey-legal ways of writing to them (`as_mut_ref`, `.ptr`, out-parameters) stay valid until the drain; `tests/qjs_root_contract.rs` keeps them working. |
 | `Heap<T>`, reserved slots | Counted: the `Heap*WriteBarriers` dup the new value and free the old one; `Drop` frees; `trace` marks it. |
 | `AddRawValueRoot` / `PermanentRoot` | Counted, never marked. |
 | Realm pointers cached by shim objects | Counted on the realm's context and marked (Q15); realm-stack entries counted, not marked. |
@@ -47,8 +47,9 @@ Rule: anything that can outlive the current task holds a reference count; anythi
 
 Why the pool is safe:
 - Under SM, an unrooted value dies at the next GC, which can happen at any `CanGc` point.
-- Under the pool, every value Rust has touched lives until the task ends.
-- So any code that is correct under SM is also correct here.
+- Under the pool, every value Rust has touched lives until the pool drains back past it: at the end of the task, when the native call, proxy trap or promise hook that took it returns, or when the `AutoreleasePoolScope` it was taken in is dropped.
+- A drain at a return is like SM roots dying with the native's frame; the shim duplicates what it hands back to QuickJS (return values, out-parameters) before draining.
+- So code that is correct under SM is also correct here, except for a root written after a drain's mark and read after the drain, such as a root declared before an `AutoreleasePoolScope` and written inside it: under SM it stays valid, here it dangles. Servo's microtask checkpoint and `tests/qjs_root_contract.rs` write such roots before reading them in each iteration.
 
 The cost is memory: values stay alive until the end of the task. A build with `QJS_POOL_STATS=1` measures what the pool holds, by API function and by what became of each value (`engine/pool_stats.rs`, `tools/pool_stats.py`).
 

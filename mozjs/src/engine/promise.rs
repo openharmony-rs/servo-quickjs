@@ -493,13 +493,18 @@ unsafe extern "C" fn make_job_callback(ctx: *mut q::JSContext, opaque: *mut c_vo
         return q::JS_UNDEFINED;
     }
     let entered = enter_qctx(cx, ctx);
+    let mark = cx.pool_mark();
     let incumbent = incumbent_global(cx, &*queue);
     leave_qctx(cx, entered);
-    match incumbent {
+    let incumbent = match incumbent {
         Some(incumbent) if !incumbent.is_null() => q::JS_DupValueRT(cx.rt, obj_val(incumbent)),
         Some(_) => q::JS_NULL,
         None => q::JS_UNDEFINED,
-    }
+    };
+    // What the trap pooled (its out-parameters) would otherwise stay until the task ends, one
+    // entry per `then()` or `await`.
+    cx.drain_pool(mark);
+    incumbent
 }
 
 /// Patch Q4's hook: queues a QuickJS promise job as a `MicroTask`.
@@ -545,10 +550,16 @@ unsafe fn enqueue_microtask(
     let incumbent = match host_defined.tag() {
         q::JS_TAG_OBJECT => q::JS_DupValueRT(cx.rt, host_defined),
         q::JS_TAG_NULL => q::JS_UNDEFINED,
-        _ => match incumbent_global(cx, queue) {
-            Some(incumbent) => q::JS_DupValueRT(cx.rt, object_or_undefined(incumbent)),
-            None => return -1,
-        },
+        _ => {
+            let mark = cx.pool_mark();
+            let incumbent = incumbent_global(cx, queue)
+                .map(|incumbent| q::JS_DupValueRT(cx.rt, object_or_undefined(incumbent)));
+            cx.drain_pool(mark);
+            match incumbent {
+                Some(incumbent) => incumbent,
+                None => return -1,
+            }
+        }
     };
     let task = q::JS_NewObjectProtoClass(cx.qctx(), q::JS_NULL, microtask_class(cx.rt));
     if task.tag() == q::JS_TAG_EXCEPTION {

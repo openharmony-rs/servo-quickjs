@@ -40,6 +40,56 @@ pub fn drain_autorelease_pool() {
     crate::engine::drain_current_pool()
 }
 
+/// Releases, when it is dropped, what the autorelease pool took while it was alive: the values
+/// the engine handed to Rust and the last references Rust dropped. Otherwise they stay until the
+/// task ends. Servo opens one for each microtask, so that a long chain of microtasks in one task
+/// doesn't keep every finished job alive.
+pub struct AutoreleasePoolScope {
+    mark: (usize, usize),
+    cx: *const crate::engine::Cx,
+}
+
+impl AutoreleasePoolScope {
+    /// # Safety
+    /// Nothing obtained while the scope is alive may be used after it is dropped, unless it holds
+    /// a reference of its own (`Heap`, `Dom<T>`, `retain_object`). That includes values written
+    /// to roots declared before the scope (roots hold no references, the pool keeps their values
+    /// alive), and objects obtained before the scope whose last reference Rust drops while it is
+    /// alive (`release_object` moves that reference to the pool).
+    ///
+    /// The scope must be dropped on the runtime it was created on, before the native call or task
+    /// that created it ends, and in reverse order of creation with other scopes: those drains
+    /// release everything above their own mark, so a scope outliving one of them would release
+    /// entries that are not its own.
+    ///
+    /// # Panics
+    /// If the thread has no runtime.
+    pub unsafe fn new() -> Self {
+        let cx = crate::engine::current();
+        Self {
+            mark: cx.pool_mark(),
+            cx,
+        }
+    }
+}
+
+impl Drop for AutoreleasePoolScope {
+    fn drop(&mut self) {
+        if let Some(cx) = crate::engine::try_current() {
+            debug_assert!(
+                std::ptr::eq(&*cx, self.cx),
+                "AutoreleasePoolScope dropped on another runtime"
+            );
+            let len = cx.pool_mark();
+            debug_assert!(
+                self.mark.0 <= len.0 && self.mark.1 <= len.1,
+                "AutoreleasePoolScope outlived a drain below its mark"
+            );
+            cx.drain_pool(self.mark);
+        }
+    }
+}
+
 /// The autorelease pool statistics of this thread's runtime as JSON (built with
 /// `QJS_POOL_STATS=1`, see `engine/pool_stats.rs`).
 #[cfg(qjs_pool_stats)]
