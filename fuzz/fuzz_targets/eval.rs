@@ -246,21 +246,15 @@ unsafe extern "C" fn get(
         *vp.ptr = Int32Value(value);
         return true;
     }
-    let mut proto = ptr::null_mut();
-    if !mozjs::jsapi::JS_GetPrototype(cx, proxy, MutableHandle::from_marked_location(&mut proto)) {
+    rooted!(in(cx) let mut proto = ptr::null_mut::<JSObject>());
+    if !mozjs::jsapi::JS_GetPrototype(cx, proxy, proto.handle_mut().into()) {
         return false;
     }
     if proto.is_null() {
         *vp.ptr = UndefinedValue();
         return true;
     }
-    mozjs::jsapi::JS_ForwardGetPropertyTo(
-        cx,
-        Handle::from_marked_location(&proto),
-        id,
-        receiver,
-        vp,
-    )
+    mozjs::jsapi::JS_ForwardGetPropertyTo(cx, proto.handle().into(), id, receiver, vp)
 }
 
 unsafe extern "C" fn prevent_extensions(

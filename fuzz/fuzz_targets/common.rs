@@ -22,7 +22,7 @@ use mozjs::jsapi::{
     JSContext as RawJSContext, JSObject, JSString, JSStructuredCloneCallbacks,
     JSStructuredCloneReader, JSStructuredCloneWriter, JS_NewObject, JS_NewStringCopyZ,
     JS_ReadString, JS_ReadUint32Pair, JS_SetReservedSlot, JS_WriteString,
-    JS_WriteUint32PairUnchecked, MutableHandle, OnNewGlobalHookOption, StructuredCloneScope,
+    JS_WriteUint32PairUnchecked, OnNewGlobalHookOption, StructuredCloneScope,
     JSCLASS_RESERVED_SLOTS_MASK, JSCLASS_RESERVED_SLOTS_SHIFT, JS_STRUCTURED_CLONE_VERSION,
 };
 use mozjs::jsval::{JSVal, ObjectValue, StringValue, UndefinedValue};
@@ -224,11 +224,11 @@ unsafe extern "C" fn read_host(
     }
     let (mut a, mut b) = (0, 0);
     let _ = JS_ReadUint32Pair(r, &mut a, &mut b);
-    let mut s: *mut JSString = ptr::null_mut();
-    if !JS_ReadString(r, MutableHandle::from_marked_location(&mut s)) || s.is_null() {
+    rooted!(in(cx) let mut s = ptr::null_mut::<JSString>());
+    if !JS_ReadString(r, s.handle_mut().into()) || s.is_null() {
         return ptr::null_mut();
     }
-    new_host(cx, StringValue(&*s))
+    new_host(cx, StringValue(&*s.get()))
 }
 
 pub static CALLBACKS: JSStructuredCloneCallbacks = JSStructuredCloneCallbacks {
