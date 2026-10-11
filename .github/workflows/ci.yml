@@ -62,6 +62,9 @@ jobs:
         run: pkg-config --exists icu-i18n || (sudo apt-get update && sudo apt-get install -y libicu-dev)
       - name: Tests under ASan and LSan
         run: just test-asan
+      # Optimized builds lost the pool entries pushed while the pool drains (engine/mod.rs).
+      - name: Pool tests in an optimized build under ASan
+        run: just test-asan --release --test qjs_pool
 
   fuzz:
     runs-on: ubuntu-24.04

@@ -182,17 +182,7 @@ impl Cx {
 
     /// Releases the values retained since `mark` (see `pool_mark`).
     pub fn drain_pool(&mut self, mark: (usize, usize)) {
-        while self.pool.len() > mark.0 {
-            let v = self.pool.pop().unwrap();
-            #[cfg(qjs_pool_stats)]
-            pool_stats::popped(v);
-            verify::pooled(v, -1);
-            unsafe { q::JS_FreeValueRT(self.rt, v) };
-        }
-        while self.atom_pool.len() > mark.1 {
-            let a = self.atom_pool.pop().unwrap();
-            unsafe { q::JS_FreeAtomRT(self.rt, a) };
-        }
+        unsafe { drain_pool(self, mark) }
     }
 
     pub fn pool_mark(&self) -> (usize, usize) {
@@ -308,6 +298,26 @@ pub(crate) unsafe fn release_object(obj: *mut root::JSObject) {
         } else {
             q::JS_FreeValueRT(cx.rt, v);
         }
+    }
+}
+
+// A drain frees values whose finalizers may release more values into the pool through
+// `current()` (`release_object` defers a last release there). The loop reads the pool through a
+// raw pointer, in a function that isn't inlined, so that optimized builds reload it after each
+// free. That only avoids the miscompile: callers still hold a `&mut Cx` while the finalizers take
+// another one, which a follow-up removes by reaching `Cx` through shared references only.
+#[inline(never)]
+unsafe fn drain_pool(cx: *mut Cx, mark: (usize, usize)) {
+    while (*cx).pool.len() > mark.0 {
+        let v = (*cx).pool.pop().unwrap();
+        #[cfg(qjs_pool_stats)]
+        pool_stats::popped(v);
+        verify::pooled(v, -1);
+        q::JS_FreeValueRT((*cx).rt, v);
+    }
+    while (*cx).atom_pool.len() > mark.1 {
+        let a = (*cx).atom_pool.pop().unwrap();
+        q::JS_FreeAtomRT((*cx).rt, a);
     }
 }
 
