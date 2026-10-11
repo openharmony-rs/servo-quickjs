@@ -600,6 +600,7 @@ impl DateFormat {
         with_buffer(|buf, cap, err| unsafe {
             udat_format(self.0, t, buf, cap, ptr::null_mut(), err)
         })
+        .map(replace_special_spaces)
     }
 
     /// The formatted date and its (UDateFormatField, begin, end) spans.
@@ -608,8 +609,19 @@ impl DateFormat {
         let text = with_buffer(|buf, cap, err| unsafe {
             udat_formatForFields(self.0, t, buf, cap, iter.0, err)
         })?;
-        Some((text, iter.spans()))
+        Some((replace_special_spaces(text), iter.spans()))
     }
+}
+
+/// Replaces NARROW NO-BREAK SPACE and THIN SPACE, which CLDR 42 put into time formats, with a
+/// space, as SpiderMonkey does: pages expect "3:05 PM" (Firefox bug 1806042).
+fn replace_special_spaces(mut text: Vec<u16>) -> Vec<u16> {
+    for c in &mut text {
+        if *c == 0x202F || *c == 0x2009 {
+            *c = 0x20;
+        }
+    }
+    text
 }
 
 impl Drop for DateFormat {

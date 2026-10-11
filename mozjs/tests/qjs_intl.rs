@@ -77,6 +77,7 @@ fn qjs_intl() {
             from_pages(cx, global.handle());
             numbers(cx, global.handle());
             dates(cx, global.handle());
+            web_compat(cx, global.handle());
             collation_and_case(cx, global.handle());
             locales_and_objects(cx, global.handle());
         }
@@ -217,21 +218,21 @@ unsafe fn dates(cx: &mut JSContext, global: HandleObject) {
     let t = "Date.UTC(2026, 9, 7, 15, 5, 9, 25)";
     let utc = |expr: &str| expr.replace("$T", t);
     let cases: Vec<(String, &str)> = vec![
-        (utc(r#"new Date($T).toLocaleString("en-US", {timeZone: "UTC"})"#), "10/7/2026, 3:05:09\u{202f}PM"),
+        (utc(r#"new Date($T).toLocaleString("en-US", {timeZone: "UTC"})"#), "10/7/2026, 3:05:09 PM"),
         (utc(r#"new Date($T).toLocaleString("zh-CN", {timeZone: "UTC"})"#), "2026/10/7 下午3:05:09"),
         (utc(r#"new Date($T).toLocaleTimeString("en-GB", {timeZone: "UTC"})"#), "15:05:09"),
         (utc(r#"new Date($T).toLocaleDateString("en-US", {dateStyle: "long", timeZone: "UTC"})"#), "October 7, 2026"),
         (utc(r#"new Date($T).toLocaleDateString("zh-CN", {dateStyle: "full", timeZone: "UTC"})"#), "2026年10月7日星期三"),
-        (utc(r#"new Date($T).toLocaleString("en-US", {dateStyle: "short", timeStyle: "short", timeZone: "UTC"})"#), "10/7/26, 3:05\u{202f}PM"),
+        (utc(r#"new Date($T).toLocaleString("en-US", {dateStyle: "short", timeStyle: "short", timeZone: "UTC"})"#), "10/7/26, 3:05 PM"),
         (utc(r#"new Date($T).toLocaleTimeString("en-US", {timeStyle: "short", hour12: false, timeZone: "UTC"})"#), "15:05"),
         (utc(r#"new Date($T).toLocaleDateString("en-US", {weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "UTC"})"#), "Wednesday, October 7, 2026"),
         (utc(r#"new Date($T).toLocaleDateString("zh-CN", {month: "long", day: "numeric", timeZone: "UTC"})"#), "10月7日"),
         (utc(r#"new Date($T).toLocaleDateString("ja-JP", {year: "numeric", month: "short", day: "numeric", weekday: "short", timeZone: "UTC"})"#), "2026年10月7日(水)"),
-        (utc(r#"new Date($T).toLocaleTimeString("en-US", {hour: "2-digit", minute: "2-digit", timeZone: "UTC"})"#), "03:05\u{202f}PM"),
+        (utc(r#"new Date($T).toLocaleTimeString("en-US", {hour: "2-digit", minute: "2-digit", timeZone: "UTC"})"#), "03:05 PM"),
         (utc(r#"new Date($T).toLocaleTimeString("en-US", {hour: "numeric", minute: "2-digit", hour12: false, timeZone: "UTC"})"#), "15:05"),
         (utc(r#"new Date($T).toLocaleTimeString("zh-CN", {hour: "numeric", minute: "2-digit", hourCycle: "h23", timeZone: "UTC"})"#), "15:05"),
-        (utc(r#"new Date($T).toLocaleTimeString("en-US", {hour: "numeric", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3, timeZone: "UTC"})"#), "3:05:09.025\u{202f}PM"),
-        (utc(r#"new Date($T).toLocaleTimeString("en-US", {timeZone: "Asia/Shanghai", timeZoneName: "short"})"#), "11:05:09\u{202f}PM GMT+8"),
+        (utc(r#"new Date($T).toLocaleTimeString("en-US", {hour: "numeric", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3, timeZone: "UTC"})"#), "3:05:09.025 PM"),
+        (utc(r#"new Date($T).toLocaleTimeString("en-US", {timeZone: "Asia/Shanghai", timeZoneName: "short"})"#), "11:05:09 PM GMT+8"),
         (utc(r#"new Date($T).toLocaleDateString("de-AT", {timeZone: "UTC"})"#), "7.10.2026"),
         (utc(r#"new Intl.DateTimeFormat("en-US", {month: "short", day: "2-digit", timeZone: "UTC"}).formatToParts($T).map(p => p.type + ":" + p.value).join("|")"#), "month:Oct|literal: |day:07"),
         (utc(r#"JSON.stringify(new Intl.DateTimeFormat("en-US", {hour: "numeric", minute: "numeric", timeZone: "Asia/Shanghai"}).resolvedOptions())"#),
@@ -249,6 +250,30 @@ unsafe fn dates(cx: &mut JSContext, global: HandleObject) {
     ];
     let cases: Vec<(&str, &str)> = cases.iter().map(|(e, x)| (e.as_str(), *x)).collect();
     check(cx, global, &cases);
+}
+
+/// The web compatibility requirements of WPT's ecmascript/locale-compat.html, which browsers meet
+/// by changing ICU's output.
+#[cfg(qjs_intl)]
+unsafe fn web_compat(cx: &mut JSContext, global: HandleObject) {
+    check(
+        cx,
+        global,
+        &[
+            (
+                r#"/:\d\d:\d\d\x20[AP]M$/.test(new Date("2022-12-31T23:59:42").toLocaleString("en-US"))"#,
+                "true",
+            ),
+            (
+                r#"/:\d\d:\d\d\x20[AP]M /.test(new Intl.DateTimeFormat("en", {timeStyle: "long"}).format(new Date("2022-12-31T23:59:42")))"#,
+                "true",
+            ),
+            (
+                r#"new Intl.DateTimeFormat("en-US", {hour: "numeric", minute: "2-digit", timeZone: "UTC"}).formatToParts(0).map(p => p.value).join("|")"#,
+                "12|:|00| |AM",
+            ),
+        ],
+    );
 }
 
 #[cfg(qjs_intl)]
