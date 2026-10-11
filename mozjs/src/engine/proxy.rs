@@ -1131,9 +1131,11 @@ pub(crate) unsafe fn IsProxyHandlerFamily(obj: *mut root::JSObject) -> bool {
     proxy_handler(obj).is_some_and(|handler| handler.kind == Kind::Forwarding)
 }
 
-unsafe fn set_counted(slot: &mut q::JSValue, v: JSVal) {
+/// Stores `v` (counted) in `slot`. A raw pointer, not a `&mut` that would stay borrowed while the
+/// old value is freed: that can run finalizers that read this proxy's slots.
+unsafe fn set_counted(slot: *mut q::JSValue, v: JSVal) {
     let rt = super::current().rt;
-    let old = std::mem::replace(slot, q::JS_DupValueRT(rt, v.to_qjs()));
+    let old = slot.replace(q::JS_DupValueRT(rt, v.to_qjs()));
     q::JS_FreeValueRT(rt, old);
 }
 

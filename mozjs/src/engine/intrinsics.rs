@@ -117,8 +117,9 @@ fn forget_entry(maps: &mut HolderMaps, id: u64) {
     }
 }
 
-/// Drops the entries of freed holder maps from a key object.
-unsafe fn purge(rt: *mut q::JSRuntime, internals: &mut Internals) {
+/// Drops the entries of freed holder maps from a key object, and returns their holders. The caller
+/// frees them once it is done with `internals`: freeing can run finalizers.
+fn purge(internals: &mut Internals) -> Vec<q::JSValue> {
     let freed: Vec<u64> = HOLDER_MAPS.with(|m| {
         let m = m.borrow();
         if m.freed.is_empty() {
@@ -131,12 +132,14 @@ unsafe fn purge(rt: *mut q::JSRuntime, internals: &mut Internals) {
             .filter(|id| m.freed.contains(id))
             .collect()
     });
-    for id in freed {
-        if let Some(holder) = internals.holders.remove(&id) {
+    freed
+        .into_iter()
+        .filter_map(|id| {
+            let holder = internals.holders.remove(&id)?;
             HOLDER_MAPS.with(|m| forget_entry(&mut m.borrow_mut(), id));
-            q::JS_FreeValueRT(rt, holder);
-        }
-    }
+            Some(holder)
+        })
+        .collect()
 }
 
 unsafe fn class(
@@ -332,11 +335,15 @@ pub(crate) unsafe fn holder(
 ) -> Option<q::JSValue> {
     let id = holder_map_id(map)?;
     let internals = internals_of(key)?;
-    purge(rt, internals);
-    Some(match internals.holders.get(&id) {
+    let purged = purge(internals);
+    let holder = match internals.holders.get(&id) {
         Some(&v) => q::JS_DupValueRT(rt, v),
         None => q::JS_UNDEFINED,
-    })
+    };
+    for v in purged {
+        q::JS_FreeValueRT(rt, v);
+    }
+    Some(holder)
 }
 
 /// Stores `value` for `key`'s realm under `map`; false if `map` and `key` are not a holder map and
@@ -350,10 +357,13 @@ pub(crate) unsafe fn set_holder(
     let (Some(id), Some(internals)) = (holder_map_id(map), internals_of(key)) else {
         return false;
     };
-    purge(rt, internals);
-    match internals.holders.insert(id, q::JS_DupValueRT(rt, value)) {
-        Some(old) => q::JS_FreeValueRT(rt, old),
-        None => HOLDER_MAPS.with(|m| *m.borrow_mut().entries.entry(id).or_default() += 1),
+    let purged = purge(internals);
+    let old = internals.holders.insert(id, q::JS_DupValueRT(rt, value));
+    if old.is_none() {
+        HOLDER_MAPS.with(|m| *m.borrow_mut().entries.entry(id).or_default() += 1);
+    }
+    for v in purged.into_iter().chain(old) {
+        q::JS_FreeValueRT(rt, v);
     }
     true
 }

@@ -5,7 +5,7 @@
 //! The JavaScript side of the Intl subset: QuickJS native functions and option processing.
 
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, CStr, CString};
 use std::ptr;
@@ -43,7 +43,7 @@ const DATA: c_int =
 struct IntlObject {
     state: State,
     /// The bound `format` or `compare` function, once read; a counted reference.
-    bound: q::JSValue,
+    bound: Cell<q::JSValue>,
 }
 
 enum State {
@@ -72,23 +72,23 @@ unsafe fn class_ids(rt: *mut q::JSRuntime) -> [q::JSClassID; 3] {
     ids
 }
 
-unsafe fn intl_object<'a>(v: q::JSValue, kind: usize) -> Option<&'a mut IntlObject> {
+unsafe fn intl_object<'a>(v: q::JSValue, kind: usize) -> Option<&'a IntlObject> {
     let id = CLASS_IDS.get()?[kind];
-    (q::JS_GetOpaque(v, id) as *mut IntlObject).as_mut()
+    (q::JS_GetOpaque(v, id) as *const IntlObject).as_ref()
 }
 
 unsafe extern "C" fn finalize(rt: *mut q::JSRuntime, val: q::JSValue) {
     let p = q::JS_GetOpaque(val, q::JS_GetClassID(val)) as *mut IntlObject;
     if !p.is_null() {
         let obj = Box::from_raw(p);
-        q::JS_FreeValueRT(rt, obj.bound);
+        q::JS_FreeValueRT(rt, obj.bound.get());
     }
 }
 
 unsafe extern "C" fn gc_mark(rt: *mut q::JSRuntime, val: q::JSValue, mark_func: q::JS_MarkFunc) {
     let p = q::JS_GetOpaque(val, q::JS_GetClassID(val)) as *mut IntlObject;
     if let Some(obj) = p.as_ref() {
-        q::JS_MarkValue(rt, obj.bound, mark_func);
+        q::JS_MarkValue(rt, obj.bound.get(), mark_func);
     }
 }
 
@@ -1838,7 +1838,7 @@ unsafe extern "C" fn construct(
         obj,
         Box::into_raw(Box::new(IntlObject {
             state,
-            bound: q::JS_UNDEFINED,
+            bound: Cell::new(q::JS_UNDEFINED),
         })) as *mut _,
     );
     obj
@@ -1848,7 +1848,7 @@ unsafe fn this_object<'a>(
     ctx: *mut q::JSContext,
     this: q::JSValue,
     kind: usize,
-) -> Result<&'a mut IntlObject> {
+) -> Result<&'a IntlObject> {
     match intl_object(this, kind) {
         Some(obj) => Ok(obj),
         None => throw_type(
@@ -1886,16 +1886,16 @@ unsafe extern "C" fn get_bound(
         Ok(obj) => obj,
         Err(()) => return q::JS_EXCEPTION,
     };
-    if is_undefined(obj.bound) {
+    if is_undefined(obj.bound.get()) {
         let length = if magic as usize == COLLATOR { 2 } else { 1 };
         let mut data = this;
         let f = q::JS_NewCFunctionData(ctx, Some(call_bound), length, magic, 1, &mut data);
         if f.tag() == q::JS_TAG_EXCEPTION {
             return f;
         }
-        obj.bound = f;
+        obj.bound.set(f);
     }
-    q::JS_DupValue(ctx, obj.bound)
+    q::JS_DupValue(ctx, obj.bound.get())
 }
 
 unsafe extern "C" fn call_bound(
