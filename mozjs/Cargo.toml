@@ -17,7 +17,7 @@ default = ["jit", "libz-sys", "intl"]
 # Accepted for compatibility with Servo's feature forwarding; no effect on QuickJS.
 crown = []
 debugmozjs = []
-# An Intl subset over the OS's ICU (OpenHarmony only).
+# An Intl subset over the OS's ICU: the NDK's on OpenHarmony, the system's on other Linux (libicu-dev).
 intl = []
 jit = []
 jitspew = []
@@ -31,3 +31,6 @@ libc = "0.2"
 log = "0.4"
 num-traits = "0.2"
 servo-quickjs = { path = "../servo-quickjs" }
+
+[build-dependencies]
+pkg-config = "0.3.34"

@@ -35,7 +35,7 @@ Use `patch.crates-io.mozjs.path="/path/to/servo-quickjs/mozjs"` for a local chec
 ## Differences from SpiderMonkey
 
 - No JIT, WebAssembly, devtools debugger or `SharedArrayBuffer`.
-- `Intl` is a subset implemented over the OS's ICU on OpenHarmony, and absent elsewhere (see [docs/design.md](docs/design.md#intl)).
+- `Intl` is a subset implemented over the OS's ICU on OpenHarmony and Linux, and absent elsewhere (see [docs/design.md](docs/design.md#intl)). On Linux it needs the system ICU (`libicu-dev`), unless the `intl` feature is disabled.
 - QuickJS frees objects by reference counting and collects cycles. Servo's tracing must report every reference exactly once; `QJS_VERIFY_TRACING=1` checks that at run time.
 
 ## Development

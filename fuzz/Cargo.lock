@@ -109,6 +109,7 @@ dependencies = [
  "libc",
  "log",
  "num-traits",
+ "pkg-config",
  "servo-quickjs",
 ]
 
@@ -126,6 +127,12 @@ checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
 ]
+
+[[package]]
+name = "pkg-config"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "r-efi"

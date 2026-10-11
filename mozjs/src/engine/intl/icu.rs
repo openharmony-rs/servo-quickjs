@@ -2,8 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-//! The ICU4C C API of the OpenHarmony NDK (`libicu.so`, ICU 72 headers, unversioned symbols),
-//! and owned wrappers of the ICU objects the Intl subset uses.
+//! The ICU4C C API, and owned wrappers of the ICU objects the Intl subset uses. On OpenHarmony
+//! it is the NDK's `libicu.so` (ICU 72 headers, unversioned symbols); on other Linux, the system
+//! ICU that `build.rs` links, whose symbols end in its major version (`ucol_open_74`).
 
 #![allow(non_camel_case_types)]
 
@@ -69,8 +70,20 @@ pub const UCOL_UPPER_FIRST: i32 = 25;
 pub const UDAT_NONE: i32 = -1;
 const UDAT_PATTERN: i32 = -2;
 
-#[link(name = "icu")]
-unsafe extern "C" {
+/// Declares ICU functions under their symbol names, which end in `ICU_SUFFIX` (from `build.rs`).
+macro_rules! icu {
+    ($(fn $name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty)?;)*) => {
+        #[cfg_attr(target_env = "ohos", link(name = "icu"))]
+        unsafe extern "C" {
+            $(
+                #[link_name = concat!(stringify!($name), env!("ICU_SUFFIX"))]
+                fn $name($($arg: $ty),*) $(-> $ret)?;
+            )*
+        }
+    };
+}
+
+icu! {
     fn uloc_getDefault() -> *const c_char;
     fn uloc_forLanguageTag(
         langtag: *const c_char,
@@ -232,6 +245,7 @@ unsafe extern "C" {
     ) -> i32;
 }
 
+#[cfg(target_env = "ohos")]
 #[link(name = "time_service_ndk")]
 unsafe extern "C" {
     fn OH_TimeService_GetTimeZone(time_zone: *mut c_char, len: u32) -> i32;
@@ -609,13 +623,14 @@ thread_local! {
     static SYSTEM_TIME_ZONE: RefCell<(String, String)> = RefCell::default();
 }
 
-/// The time zone `Date` uses: `TZ`, else the system's. ICU's default can differ (outside apps it
-/// is a guess from the UTC offset).
+/// The time zone `Date` uses: `TZ`, else the system's. On OpenHarmony, ICU's default can differ
+/// (outside apps it is a guess from the UTC offset); on Linux, ICU reads the system's.
 pub fn system_time_zone() -> String {
     let tz = std::env::var("TZ")
         .ok()
         .map(|tz| tz.trim_start_matches(':').to_owned())
         .filter(|tz| !tz.is_empty());
+    #[cfg(target_env = "ohos")]
     let tz = tz.or_else(|| {
         let mut buf = [0 as c_char; 64];
         let r = unsafe { OH_TimeService_GetTimeZone(buf.as_mut_ptr(), buf.len() as u32) };

@@ -5,7 +5,8 @@
 //! A minimal ECMA-402 subset over the OS's ICU, installed on every new realm.
 //!
 //! QuickJS has no `Intl` and ignores locales and options in `toLocaleString`, `localeCompare` and
-//! the like. The OpenHarmony NDK exports ICU4C's C API (`libicu.so`), so on OpenHarmony this adds:
+//! the like. The OpenHarmony NDK exports ICU4C's C API (`libicu.so`), and so does the system ICU of
+//! other Linux, so there this adds:
 //! - `Intl.Collator` and `String.prototype.localeCompare` (`ucol`);
 //! - `Intl.NumberFormat` and `Number.prototype.toLocaleString` (`unum`: the NDK exports
 //!   `unumf_formatDouble` but not `unumf_openResult`, so number skeletons cannot be used);
@@ -18,29 +19,34 @@
 //! - `String.prototype.toLocale{Upper,Lower}Case` (`u_strToUpper`/`u_strToLower`);
 //! - `Intl.getCanonicalLocales` and `supportedLocalesOf`.
 //!
-//! The default time zone is the one `Date` uses (`TZ`, else `OH_TimeService_GetTimeZone`): outside
-//! app processes ICU's default is only a guess. Apps get ICU's data from appspawn; standalone
-//! executables (tests run from hdc shell) need `ICU_DATA=/system/usr/icu`.
+//! A system ICU has the pattern generator and number skeletons, but Linux uses the same code as
+//! OpenHarmony, so that a desktop build behaves like the device.
+//!
+//! The default time zone is the one `Date` uses: `TZ`, else `OH_TimeService_GetTimeZone` on
+//! OpenHarmony, where ICU's default outside app processes is only a guess, and ICU's on Linux.
+//! Apps get ICU's data from appspawn; standalone executables (tests run from hdc shell) need
+//! `ICU_DATA=/system/usr/icu`.
 //!
 //! Elsewhere, or without the `intl` feature, nothing is installed and QuickJS's behaviour stays.
+//! `build.rs` sets `qjs_intl` when the subset is built.
 
-#[cfg(any(all(target_env = "ohos", feature = "intl"), test))]
-#[cfg_attr(not(all(target_env = "ohos", feature = "intl")), allow(dead_code))]
+#[cfg(any(qjs_intl, test))]
+#[cfg_attr(not(qjs_intl), allow(dead_code))]
 mod dtpg;
-#[cfg(all(target_env = "ohos", feature = "intl"))]
+#[cfg(qjs_intl)]
 mod icu;
-#[cfg(all(target_env = "ohos", feature = "intl"))]
+#[cfg(qjs_intl)]
 mod js;
-#[cfg(any(all(target_env = "ohos", feature = "intl"), test))]
-#[cfg_attr(not(all(target_env = "ohos", feature = "intl")), allow(dead_code))]
+#[cfg(any(qjs_intl, test))]
+#[cfg_attr(not(qjs_intl), allow(dead_code))]
 mod patterns;
 
 use servo_quickjs as q;
 
 /// Installs the Intl subset in a new QuickJS context, before its global gets its class.
 pub(crate) unsafe fn install_intl(ctx: *mut q::JSContext) {
-    #[cfg(all(target_env = "ohos", feature = "intl"))]
+    #[cfg(qjs_intl)]
     js::install(ctx);
-    #[cfg(not(all(target_env = "ohos", feature = "intl")))]
+    #[cfg(not(qjs_intl))]
     let _ = ctx;
 }

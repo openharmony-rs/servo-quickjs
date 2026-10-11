@@ -2,8 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-//! QuickJS shim: the Intl subset over the OS's ICU (OpenHarmony only; elsewhere QuickJS has no
-//! Intl). The expected strings follow the ICU data of OpenHarmony 7.0 (ICU 74, CLDR 44.1).
+//! QuickJS shim: the Intl subset over the OS's ICU (OpenHarmony and Linux; elsewhere QuickJS has
+//! no Intl). The expected strings follow ICU 74 (CLDR 44.1), the ICU of OpenHarmony 7.0 and of
+//! Ubuntu 24.04.
 
 use std::ptr::{self, NonNull};
 
@@ -69,9 +70,9 @@ fn qjs_intl() {
         ));
         let mut realm = mozjs::realm::AutoRealm::new_from_handle(cx, global.handle());
         let cx = &mut *realm;
-        #[cfg(not(target_env = "ohos"))]
+        #[cfg(not(qjs_intl))]
         check(cx, global.handle(), &[("typeof Intl", "undefined")]);
-        #[cfg(target_env = "ohos")]
+        #[cfg(qjs_intl)]
         {
             from_pages(cx, global.handle());
             numbers(cx, global.handle());
@@ -83,7 +84,7 @@ fn qjs_intl() {
 }
 
 /// The calls of real pages that motivated the subset.
-#[cfg(target_env = "ohos")]
+#[cfg(qjs_intl)]
 unsafe fn from_pages(cx: &mut JSContext, global: HandleObject) {
     check(
         cx,
@@ -110,7 +111,7 @@ unsafe fn from_pages(cx: &mut JSContext, global: HandleObject) {
     );
 }
 
-#[cfg(target_env = "ohos")]
+#[cfg(qjs_intl)]
 unsafe fn numbers(cx: &mut JSContext, global: HandleObject) {
     check(
         cx,
@@ -211,7 +212,7 @@ unsafe fn numbers(cx: &mut JSContext, global: HandleObject) {
     );
 }
 
-#[cfg(target_env = "ohos")]
+#[cfg(qjs_intl)]
 unsafe fn dates(cx: &mut JSContext, global: HandleObject) {
     let t = "Date.UTC(2026, 9, 7, 15, 5, 9, 25)";
     let utc = |expr: &str| expr.replace("$T", t);
@@ -250,7 +251,7 @@ unsafe fn dates(cx: &mut JSContext, global: HandleObject) {
     check(cx, global, &cases);
 }
 
-#[cfg(target_env = "ohos")]
+#[cfg(qjs_intl)]
 unsafe fn collation_and_case(cx: &mut JSContext, global: HandleObject) {
     check(
         cx,
@@ -314,7 +315,7 @@ unsafe fn collation_and_case(cx: &mut JSContext, global: HandleObject) {
     );
 }
 
-#[cfg(target_env = "ohos")]
+#[cfg(qjs_intl)]
 unsafe fn locales_and_objects(cx: &mut JSContext, global: HandleObject) {
     check(
         cx,

@@ -23,4 +23,31 @@ fn main() {
     println!("cargo:rerun-if-changed=stub_bindings.py");
     println!("cargo:rerun-if-changed=upstream-bindgen");
     println!("cargo:rerun-if-changed=src/engine");
+    icu();
+}
+
+/// Sets `qjs_intl` if the Intl subset is built, and `ICU_SUFFIX` to the suffix of ICU's symbols:
+/// none for the NDK's `libicu`, the major version for a system ICU (`ucol_open_74`).
+fn icu() {
+    println!("cargo:rustc-check-cfg=cfg(qjs_intl)");
+    let intl = std::env::var_os("CARGO_FEATURE_INTL").is_some()
+        && std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "linux";
+    let mut suffix = String::new();
+    match std::env::var("CARGO_CFG_TARGET_ENV").unwrap().as_str() {
+        "ohos" if intl => println!("cargo:rustc-cfg=qjs_intl"),
+        "gnu" if intl => {
+            let icu = pkg_config::Config::new()
+                .probe("icu-i18n")
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "the `intl` feature needs the system ICU (libicu-dev, or libicu-devel), \
+                         or build without the feature: {e}"
+                    )
+                });
+            suffix = format!("_{}", icu.version.split('.').next().unwrap());
+            println!("cargo:rustc-cfg=qjs_intl");
+        }
+        _ => {}
+    }
+    println!("cargo:rustc-env=ICU_SUFFIX={suffix}");
 }

@@ -31,6 +31,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      - name: System ICU, for the Intl subset
+        run: pkg-config --exists icu-i18n || (sudo apt-get update && sudo apt-get install -y libicu-dev)
       - name: Bindings match quickjs.h
         run: just check-bindings
       - name: Tests
@@ -54,6 +56,8 @@ jobs:
           fi
           symbolizer=$(command -v "${CLANG/clang/llvm-symbolizer}")
           echo "ASAN_SYMBOLIZER_PATH=$symbolizer" >> "$GITHUB_ENV"
+      - name: System ICU, for the Intl subset
+        run: pkg-config --exists icu-i18n || (sudo apt-get update && sudo apt-get install -y libicu-dev)
       - name: Tests under ASan and LSan
         run: just test-asan
 
@@ -73,5 +77,7 @@ jobs:
           fi
           symbolizer=$(command -v "${CLANG/clang/llvm-symbolizer}")
           echo "ASAN_SYMBOLIZER_PATH=$symbolizer" >> "$GITHUB_ENV"
+      - name: System ICU, for the Intl subset
+        run: pkg-config --exists icu-i18n || (sudo apt-get update && sudo apt-get install -y libicu-dev)
       - name: Fuzz each target for a minute
         run: just fuzz-smoke 60
