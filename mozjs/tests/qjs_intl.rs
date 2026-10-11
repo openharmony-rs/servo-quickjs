@@ -220,6 +220,9 @@ unsafe fn dates(cx: &mut JSContext, global: HandleObject) {
     let cases: Vec<(String, &str)> = vec![
         (utc(r#"new Date($T).toLocaleString("en-US", {timeZone: "UTC"})"#), "10/7/2026, 3:05:09 PM"),
         (utc(r#"new Date($T).toLocaleString("zh-CN", {timeZone: "UTC"})"#), "2026/10/7 下午3:05:09"),
+        (utc(r#"new Date($T).toLocaleDateString("zh-SG", {timeZone: "UTC"})"#), "07/10/2026"),
+        (utc(r#"new Date($T).toLocaleDateString("zh-MO", {weekday: "short", year: "numeric", month: "numeric", day: "numeric", timeZone: "UTC"})"#), "7/10/2026（週三）"),
+        (utc(r#"new Date($T).toLocaleDateString("zh-Hans-HK", {month: "short", day: "numeric", timeZone: "UTC"})"#), "10月7日"),
         (utc(r#"new Date($T).toLocaleTimeString("en-GB", {timeZone: "UTC"})"#), "15:05:09"),
         (utc(r#"new Date($T).toLocaleDateString("en-US", {dateStyle: "long", timeZone: "UTC"})"#), "October 7, 2026"),
         (utc(r#"new Date($T).toLocaleDateString("zh-CN", {dateStyle: "full", timeZone: "UTC"})"#), "2026年10月7日星期三"),
