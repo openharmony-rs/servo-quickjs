@@ -4,6 +4,7 @@
 
 //! Engine and runtime lifetime, GC and stack configuration.
 
+use std::cell::Cell;
 use std::ffi::{c_char, c_int, c_void};
 use std::ptr;
 
@@ -34,27 +35,28 @@ pub(crate) unsafe fn JS_NewContext(
     let cx = Box::into_raw(Box::new(Cx {
         rt,
         base_ctx,
-        realm_stack: Vec::new(),
-        pool: Vec::new(),
-        atom_pool: Vec::new(),
-        warning_reporter: None,
+        realm_stack: Default::default(),
+        pool: Default::default(),
+        atom_pool: Default::default(),
+        warning_reporter: Cell::new(None),
         hooks: Default::default(),
-        base_key_object,
+        base_key_object: Cell::new(base_key_object),
     }));
     q::JS_SetRuntimeOpaque(rt, cx as *mut _);
     set_current(cx);
     cx as *mut root::JSContext
 }
 
-pub(crate) unsafe fn JS_DestroyContext(cx: *mut root::JSContext) {
-    let mut cx = Box::from_raw(cx as *mut Cx);
+pub(crate) unsafe fn JS_DestroyContext(raw: *mut root::JSContext) {
+    // Finalizers reach the `Cx` through `current()` until the end, so it is only borrowed shared
+    // until then, and freed last.
+    let cx = Cx::from_raw(raw);
     while !cx.realm_stack.is_empty() {
         cx.leave_realm();
     }
-    super::free_microtasks(&mut cx);
+    super::free_microtasks(cx);
     cx.drain_pool((0, 0));
-    q::JS_FreeValueRT(cx.rt, cx.base_key_object);
-    cx.base_key_object = q::JS_UNDEFINED;
+    q::JS_FreeValueRT(cx.rt, cx.base_key_object.replace(q::JS_UNDEFINED));
     q::JS_FreeContext(cx.base_ctx);
     // Frees every object and realm (realms with their contexts, patch Q15).
     q::JS_FreeRuntime(cx.rt);
@@ -64,6 +66,7 @@ pub(crate) unsafe fn JS_DestroyContext(cx: *mut root::JSContext) {
     #[cfg(qjs_pool_stats)]
     super::pool_stats::report();
     super::verify::reset();
+    drop(Box::from_raw(raw as *mut Cx));
 }
 
 pub(crate) unsafe fn JS_GetRuntime(cx: *mut root::JSContext) -> *mut root::JSRuntime {
@@ -113,7 +116,7 @@ pub(crate) unsafe fn SetWarningReporter(
     cx: *mut root::JSContext,
     reporter: root::JS::WarningReporter,
 ) -> root::JS::WarningReporter {
-    std::mem::replace(&mut Cx::from_raw(cx).warning_reporter, reporter)
+    Cx::from_raw(cx).warning_reporter.replace(reporter)
 }
 
 pub(crate) unsafe fn JS_GC(cx: *mut root::JSContext, reason: root::JS::GCReason) {

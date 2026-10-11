@@ -62,7 +62,7 @@ impl Atom {
         Atom { atom, rt: cx.rt }
     }
 
-    pub unsafe fn from_spec_name(cx: &mut Cx, name: root::JSPropertySpec_Name) -> Atom {
+    pub unsafe fn from_spec_name(cx: &Cx, name: root::JSPropertySpec_Name) -> Atom {
         let raw = name.symbol_;
         if raw != 0 && raw <= root::JS::SymbolCode::Limit as usize {
             let atom = well_known_symbol_atom(cx, raw - 1);
@@ -100,7 +100,7 @@ thread_local! {
 }
 
 /// The atom of `Symbol[name]` for SpiderMonkey's `SymbolCode` `code` (atoms are permanent).
-pub(crate) unsafe fn well_known_symbol_atom(cx: &mut Cx, code: usize) -> q::JSAtom {
+pub(crate) unsafe fn well_known_symbol_atom(cx: &Cx, code: usize) -> q::JSAtom {
     let cached = SYMBOL_ATOMS.with(|c| c.get()[code]);
     if cached != 0 {
         return cached;
@@ -114,7 +114,7 @@ pub(crate) unsafe fn well_known_symbol_atom(cx: &mut Cx, code: usize) -> q::JSAt
     atom
 }
 
-unsafe fn lookup_well_known_symbol_atom(cx: &mut Cx, code: usize) -> q::JSAtom {
+unsafe fn lookup_well_known_symbol_atom(cx: &Cx, code: usize) -> q::JSAtom {
     let qctx = cx.base_ctx;
     let global = q::JS_GetGlobalObject(qctx);
     let symbol_ctor = q::JS_GetPropertyStr(qctx, global, c"Symbol".as_ptr());
@@ -148,7 +148,7 @@ fn ok(status: c_int) -> bool {
 }
 
 unsafe fn get(
-    cx: &mut Cx,
+    cx: &Cx,
     obj: *mut root::JSObject,
     atom: q::JSAtom,
     vp: root::JS::MutableHandleValue,
@@ -163,14 +163,14 @@ unsafe fn get(
 
 /// Like SpiderMonkey's `JS_SetProperty`, a failed assignment (e.g. to a read-only property) is
 /// ignored, as in sloppy mode; only exceptions fail.
-unsafe fn set(cx: &mut Cx, obj: *mut root::JSObject, atom: q::JSAtom, v: JSVal) -> bool {
+unsafe fn set(cx: &Cx, obj: *mut root::JSObject, atom: q::JSAtom, v: JSVal) -> bool {
     let v = q::JS_DupValueRT(cx.rt, v.to_qjs());
     let obj = obj_val(obj);
     ok(q::JS_SetPropertyInternal(cx.qctx(), obj, atom, v, obj, 0))
 }
 
 unsafe fn define_value(
-    cx: &mut Cx,
+    cx: &Cx,
     obj: *mut root::JSObject,
     atom: q::JSAtom,
     v: q::JSValue,
@@ -187,7 +187,7 @@ unsafe fn define_value(
 }
 
 unsafe fn define_accessor(
-    cx: &mut Cx,
+    cx: &Cx,
     obj: *mut root::JSObject,
     atom: q::JSAtom,
     getter: q::JSValue,
@@ -207,7 +207,7 @@ unsafe fn define_accessor(
 
 /// SetFunctionName with a prefix: `"get name"`, or `"get [description]"` for a symbol key. The
 /// caller owns the returned atom.
-unsafe fn accessor_name(cx: &mut Cx, prefix: &str, name: q::JSAtom) -> q::JSAtom {
+unsafe fn accessor_name(cx: &Cx, prefix: &str, name: q::JSAtom) -> q::JSAtom {
     let qctx = cx.qctx();
     let is_symbol = crate::sys::jsid::from_atom(name).is_symbol();
     let key = if is_symbol {
@@ -228,7 +228,7 @@ unsafe fn accessor_name(cx: &mut Cx, prefix: &str, name: q::JSAtom) -> q::JSAtom
 }
 
 /// `sym.description` through the realm's original getter (a new reference or `JS_EXCEPTION`).
-pub(crate) unsafe fn symbol_description(cx: &mut Cx, sym: q::JSValue) -> q::JSValue {
+pub(crate) unsafe fn symbol_description(cx: &Cx, sym: q::JSValue) -> q::JSValue {
     let getter = super::intrinsics::get(
         cx,
         super::intrinsics::Intrinsic::Getter(super::intrinsics::CLASS_SYMBOL, c"description"),
@@ -250,7 +250,7 @@ unsafe fn string_lossy(qctx: *mut q::JSContext, v: q::JSValue) -> String {
 }
 
 unsafe fn native_fn(
-    cx: &mut Cx,
+    cx: &Cx,
     native: root::JSNative,
     info: *const root::JSJitInfo,
     nargs: u32,
@@ -367,7 +367,7 @@ pub(crate) unsafe fn JS_SetElement(
     set(cx, *obj.ptr, atom, *v.ptr)
 }
 
-unsafe fn has(cx: &mut Cx, obj: *mut root::JSObject, atom: q::JSAtom, foundp: *mut bool) -> bool {
+unsafe fn has(cx: &Cx, obj: *mut root::JSObject, atom: q::JSAtom, foundp: *mut bool) -> bool {
     let r = q::JS_HasPropertyCached(cx.qctx(), obj_val(obj), atom, 0);
     if r < 0 {
         return false;
@@ -376,12 +376,7 @@ unsafe fn has(cx: &mut Cx, obj: *mut root::JSObject, atom: q::JSAtom, foundp: *m
     true
 }
 
-unsafe fn has_own(
-    cx: &mut Cx,
-    obj: *mut root::JSObject,
-    atom: q::JSAtom,
-    foundp: *mut bool,
-) -> bool {
+unsafe fn has_own(cx: &Cx, obj: *mut root::JSObject, atom: q::JSAtom, foundp: *mut bool) -> bool {
     let r = q::JS_GetOwnProperty(cx.qctx(), ptr::null_mut(), obj_val(obj), atom);
     if r < 0 {
         return false;
@@ -442,7 +437,7 @@ pub(crate) unsafe fn JS_AlreadyHasOwnPropertyById(
 }
 
 unsafe fn delete(
-    cx: &mut Cx,
+    cx: &Cx,
     obj: *mut root::JSObject,
     atom: q::JSAtom,
     result: *mut root::JS::ObjectOpResult,
@@ -724,7 +719,7 @@ pub(crate) unsafe fn JS_DefineElement(
 
 /// Defines a property from a SpiderMonkey descriptor (`[[DefineOwnProperty]]`).
 unsafe fn define_desc(
-    cx: &mut Cx,
+    cx: &Cx,
     obj: *mut root::JSObject,
     atom: q::JSAtom,
     desc: &root::JS::PropertyDescriptor,
@@ -833,7 +828,7 @@ pub(crate) unsafe fn JS_DefineUCProperty(
 
 /// Fills a SpiderMonkey descriptor from a QuickJS one (taking over its references via the pool).
 unsafe fn to_sm_desc(
-    cx: &mut Cx,
+    cx: &Cx,
     qd: &q::JSPropertyDescriptor,
     out: &mut root::JS::PropertyDescriptor,
 ) {
@@ -870,7 +865,7 @@ unsafe fn to_sm_desc(
 }
 
 unsafe fn own_desc(
-    cx: &mut Cx,
+    cx: &Cx,
     obj: *mut root::JSObject,
     atom: q::JSAtom,
     desc: root::JS::MutableHandle<root::JS::PropertyDescriptor>,
@@ -889,7 +884,7 @@ unsafe fn own_desc(
 }
 
 unsafe fn desc_on_chain(
-    cx: &mut Cx,
+    cx: &Cx,
     obj: *mut root::JSObject,
     atom: q::JSAtom,
     desc: root::JS::MutableHandle<root::JS::PropertyDescriptor>,
@@ -1037,7 +1032,7 @@ pub(crate) unsafe fn JS_DefineFunctionById(
 }
 
 unsafe fn define_function(
-    cx: &mut Cx,
+    cx: &Cx,
     obj: *mut root::JSObject,
     atom: q::JSAtom,
     call: root::JSNative,
@@ -1066,7 +1061,7 @@ unsafe fn define_function(
 
 /// The function for a self-hosted name in a spec. Only the `Array.prototype` methods that
 /// iterable DOM interfaces use are supported.
-unsafe fn self_hosted(cx: &mut Cx, name: *const c_char) -> q::JSValue {
+unsafe fn self_hosted(cx: &Cx, name: *const c_char) -> q::JSValue {
     let name = std::ffi::CStr::from_ptr(name);
     let method = match name.to_bytes() {
         b"$ArrayValues" => c"values",
@@ -1176,7 +1171,7 @@ unsafe fn args_vec(args: *const root::JS::HandleValueArray) -> Vec<q::JSValue> {
 }
 
 unsafe fn call(
-    cx: &mut Cx,
+    cx: &Cx,
     fun: q::JSValue,
     this: q::JSValue,
     args: *const root::JS::HandleValueArray,

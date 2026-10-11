@@ -38,8 +38,8 @@ use crate::sys::jsapi as root;
 use crate::sys::jsid::from_atom;
 use crate::sys::jsval::{JSVal, ObjectValue, UndefinedValue};
 
-fn cx_of<'a>(ctx: *mut q::JSContext) -> &'a mut Cx {
-    unsafe { &mut *(q::JS_GetRuntimeOpaque(q::JS_GetRuntime(ctx)) as *mut Cx) }
+fn cx_of<'a>(ctx: *mut q::JSContext) -> &'a Cx {
+    unsafe { &*(q::JS_GetRuntimeOpaque(q::JS_GetRuntime(ctx)) as *const Cx) }
 }
 
 fn handle<T>(p: &T) -> root::JS::Handle<T> {
@@ -240,7 +240,7 @@ fn reserved_slots(clasp: *const root::JSClass) -> usize {
 }
 
 unsafe fn new_proxy(
-    cx: &mut Cx,
+    cx: &Cx,
     handler: *const ProxyHandler,
     private: q::JSValue,
     proto: *mut root::JSObject,

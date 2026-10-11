@@ -8,6 +8,7 @@
 //! queues it as a microtask for the embedder to run at its microtask checkpoint. Without one, jobs
 //! stay in QuickJS's internal list and `RunJobs` drains it.
 
+use std::cell::Cell;
 use std::ffi::{c_int, c_void};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,45 +16,46 @@ use std::sync::Arc;
 
 use servo_quickjs as q;
 
+use super::reentrant::{Queue, Stack};
 use super::{obj_val, val_obj, Cx, RealmData};
 use crate::sys::jsapi as root;
 use crate::sys::jsval::{JSVal, UndefinedValue};
 
 /// Per-runtime state of this module (a field of `Cx`).
 pub(crate) struct RuntimeHooks {
-    job_queue: *mut JobQueue,
+    job_queue: Cell<*mut JobQueue>,
     /// The microtask queue; objects are counted.
-    microtasks: std::collections::VecDeque<q::JSValue>,
-    rejection_tracker: root::JS::PromiseRejectionTrackerCallback,
-    rejection_tracker_data: *mut c_void,
-    interrupt_callbacks: Vec<root::JSInterruptCallback>,
+    microtasks: Queue<q::JSValue>,
+    rejection_tracker: Cell<root::JS::PromiseRejectionTrackerCallback>,
+    rejection_tracker_data: Cell<*mut c_void>,
+    interrupt_callbacks: Stack<root::JSInterruptCallback>,
     /// Set by `JS_RequestInterruptCallback`, possibly from another thread.
     interrupt_requested: Arc<AtomicBool>,
-    security_callbacks: *const root::JSSecurityCallbacks,
+    security_callbacks: Cell<*const root::JSSecurityCallbacks>,
 }
 
 impl Default for RuntimeHooks {
     fn default() -> Self {
         RuntimeHooks {
-            job_queue: ptr::null_mut(),
+            job_queue: Cell::new(ptr::null_mut()),
             microtasks: Default::default(),
-            rejection_tracker: None,
-            rejection_tracker_data: ptr::null_mut(),
-            interrupt_callbacks: Vec::new(),
+            rejection_tracker: Cell::new(None),
+            rejection_tracker_data: Cell::new(ptr::null_mut()),
+            interrupt_callbacks: Default::default(),
             interrupt_requested: Default::default(),
-            security_callbacks: ptr::null(),
+            security_callbacks: Cell::new(ptr::null()),
         }
     }
 }
 
 /// The runtime state from a QuickJS hook's opaque pointer (set to the `Cx`).
-unsafe fn hook_cx<'a>(opaque: *mut c_void) -> &'a mut Cx {
-    &mut *(opaque as *mut Cx)
+unsafe fn hook_cx<'a>(opaque: *mut c_void) -> &'a Cx {
+    &*(opaque as *const Cx)
 }
 
 /// Enters the realm of QuickJS context `ctx` for an embedder callback, which expects the realm
 /// that is running script to be current. Returns whether a realm was pushed.
-unsafe fn enter_qctx(cx: &mut Cx, ctx: *mut q::JSContext) -> bool {
+unsafe fn enter_qctx(cx: &Cx, ctx: *mut q::JSContext) -> bool {
     let realm = q::JS_GetContextOpaque(ctx) as *mut RealmData;
     if realm.is_null() {
         return false;
@@ -62,7 +64,7 @@ unsafe fn enter_qctx(cx: &mut Cx, ctx: *mut q::JSContext) -> bool {
     true
 }
 
-unsafe fn leave_qctx(cx: &mut Cx, entered: bool) {
+unsafe fn leave_qctx(cx: &Cx, entered: bool) {
     if entered {
         cx.leave_realm();
     }
@@ -276,9 +278,9 @@ pub(crate) unsafe fn SetPromiseRejectionTrackerCallback(
     data: *mut ::std::os::raw::c_void,
 ) {
     let cx = Cx::from_raw(cx);
-    cx.hooks.rejection_tracker = callback;
-    cx.hooks.rejection_tracker_data = data;
-    let opaque = cx as *mut Cx as *mut c_void;
+    cx.hooks.rejection_tracker.set(callback);
+    cx.hooks.rejection_tracker_data.set(data);
+    let opaque = cx.as_raw() as *mut c_void;
     q::JS_SetHostPromiseRejectionTracker(cx.rt, callback.map(|_| track_rejection as _), opaque);
 }
 
@@ -299,15 +301,15 @@ unsafe extern "C" fn track_rejection(
 }
 
 unsafe fn notify_rejection_tracker(
-    cx: &mut Cx,
+    cx: &Cx,
     ctx: *mut q::JSContext,
     promise: *mut root::JSObject,
     state: root::JS::PromiseRejectionHandlingState,
 ) {
-    let Some(callback) = cx.hooks.rejection_tracker else {
+    let Some(callback) = cx.hooks.rejection_tracker.get() else {
         return;
     };
-    let data = cx.hooks.rejection_tracker_data;
+    let data = cx.hooks.rejection_tracker_data.get();
     let muted = super::error::current_script_muted(cx);
     let entered = enter_qctx(cx, ctx);
     callback(cx.as_raw(), muted, handle(&promise), state, data);
@@ -336,8 +338,8 @@ pub(crate) unsafe fn DeleteJobQueue(queue: *mut crate::glue::RustJobQueue) {
 
 pub(crate) unsafe fn SetJobQueue(cx: *mut root::JSContext, queue: *mut root::JS::JobQueue) {
     let cx = Cx::from_raw(cx);
-    cx.hooks.job_queue = queue as *mut JobQueue;
-    let opaque = cx as *mut Cx as *mut c_void;
+    cx.hooks.job_queue.set(queue as *mut JobQueue);
+    let opaque = cx.as_raw() as *mut c_void;
     if queue.is_null() {
         q::JS_SetEnqueueJobHook(cx.rt, None, opaque);
         q::JS_SetHostMakeJobCallbackHook(cx.rt, None, opaque);
@@ -348,7 +350,7 @@ pub(crate) unsafe fn SetJobQueue(cx: *mut root::JSContext, queue: *mut root::JS:
 }
 
 pub(crate) unsafe fn GetJobQueue(cx: *mut root::JSContext) -> *mut root::JS::JobQueue {
-    Cx::from_raw(cx).hooks.job_queue as *mut root::JS::JobQueue
+    Cx::from_raw(cx).hooks.job_queue.get() as *mut root::JS::JobQueue
 }
 
 pub(crate) unsafe fn UseInternalJobQueues(cx: *mut root::JSContext) -> bool {
@@ -358,7 +360,7 @@ pub(crate) unsafe fn UseInternalJobQueues(cx: *mut root::JSContext) -> bool {
 
 pub(crate) unsafe fn RunJobs(cx: *mut root::JSContext) {
     let cx = Cx::from_raw(cx);
-    let queue = cx.hooks.job_queue;
+    let queue = cx.hooks.job_queue.get();
     if !queue.is_null() {
         if let Some(run_jobs) = (*queue).mTraps.runJobs {
             run_jobs(cx.as_raw());
@@ -460,15 +462,15 @@ unsafe extern "C" fn microtask_gc_mark(
 }
 
 /// Frees the queued microtasks, before the runtime is destroyed.
-pub(crate) unsafe fn free_microtasks(cx: &mut Cx) {
-    for task in std::mem::take(&mut cx.hooks.microtasks) {
+pub(crate) unsafe fn free_microtasks(cx: &Cx) {
+    for task in cx.hooks.microtasks.take() {
         q::JS_FreeValueRT(cx.rt, task);
     }
 }
 
 /// The incumbent global from the queue's `getHostDefinedData` (null if none), or `None` if it
 /// failed.
-unsafe fn incumbent_global(cx: &mut Cx, queue: &JobQueue) -> Option<*mut root::JSObject> {
+unsafe fn incumbent_global(cx: &Cx, queue: &JobQueue) -> Option<*mut root::JSObject> {
     let mut incumbent: *mut root::JSObject = ptr::null_mut();
     let mut host_defined_data: *mut root::JSObject = ptr::null_mut();
     if let Some(get_host_defined_data) = queue.mTraps.getHostDefinedData {
@@ -488,7 +490,7 @@ unsafe fn incumbent_global(cx: &mut Cx, queue: &JobQueue) -> Option<*mut root::J
 /// a reaction, as SpiderMonkey takes it (`JS_NULL` for none, `JS_UNDEFINED` if it failed).
 unsafe extern "C" fn make_job_callback(ctx: *mut q::JSContext, opaque: *mut c_void) -> q::JSValue {
     let cx = hook_cx(opaque);
-    let queue = cx.hooks.job_queue;
+    let queue = cx.hooks.job_queue.get();
     if queue.is_null() {
         return q::JS_UNDEFINED;
     }
@@ -518,7 +520,7 @@ unsafe extern "C" fn enqueue_job(
     opaque: *mut c_void,
 ) -> c_int {
     let cx = hook_cx(opaque);
-    let queue = cx.hooks.job_queue;
+    let queue = cx.hooks.job_queue.get();
     assert!(!queue.is_null());
     let realm = q::JS_GetContextOpaque(ctx) as *mut RealmData;
     let entered = enter_qctx(cx, ctx);
@@ -537,7 +539,7 @@ unsafe extern "C" fn enqueue_job(
 }
 
 unsafe fn enqueue_microtask(
-    cx: &mut Cx,
+    cx: &Cx,
     queue: &JobQueue,
     realm: *mut RealmData,
     job_func: q::JSJobFunc,
@@ -624,7 +626,7 @@ pub(crate) unsafe fn GetRegularMicroTaskCount(cx: *mut root::JSContext) -> usize
 pub(crate) unsafe fn PeekNextMicroTask(cx: *mut root::JSContext) -> root::JS::GenericMicroTask {
     let cx = Cx::from_raw(cx);
     match cx.hooks.microtasks.front() {
-        Some(&entry) => cx.retain(JSVal::from_qjs(entry)),
+        Some(entry) => cx.retain(JSVal::from_qjs(entry)),
         None => UndefinedValue(),
     }
 }
@@ -727,14 +729,16 @@ pub(crate) unsafe fn JS_AddInterruptCallback(
 ) -> bool {
     let cx = Cx::from_raw(cx);
     cx.hooks.interrupt_callbacks.push(callback);
-    q::JS_SetInterruptHandler(cx.rt, Some(interrupt_handler), cx as *mut Cx as *mut c_void);
+    q::JS_SetInterruptHandler(cx.rt, Some(interrupt_handler), cx.as_raw() as *mut c_void);
     true
 }
 
 /// Thread-safe: only touches the shared request flag.
 unsafe fn request_interrupt(cx: *mut root::JSContext) {
-    let hooks = ptr::addr_of!((*(cx as *const Cx)).hooks.interrupt_requested);
-    (*hooks).store(true, Ordering::SeqCst);
+    (*(cx as *const Cx))
+        .hooks
+        .interrupt_requested
+        .store(true, Ordering::SeqCst);
 }
 
 pub(crate) unsafe fn JS_RequestInterruptCallback(cx: *mut root::JSContext) {
@@ -760,7 +764,7 @@ unsafe extern "C" fn interrupt_handler(rt: *mut q::JSRuntime, opaque: *mut c_voi
             entered = enter_qctx(cx, realm);
         }
     }
-    let callbacks = cx.hooks.interrupt_callbacks.clone();
+    let callbacks = cx.hooks.interrupt_callbacks.to_vec();
     let mut keep_running = true;
     for callback in callbacks.into_iter().flatten() {
         keep_running &= callback(cx.as_raw());
@@ -776,27 +780,27 @@ pub(crate) unsafe fn JS_SetSecurityCallbacks(
     callbacks: *const root::JSSecurityCallbacks,
 ) {
     let cx = Cx::from_raw(cx);
-    cx.hooks.security_callbacks = callbacks;
+    cx.hooks.security_callbacks.set(callbacks);
     let checks = !callbacks.is_null() && (*callbacks).contentSecurityPolicyAllows.is_some();
     let hook: q::JSCanCompileStringsHook = if checks {
         Some(can_compile_strings)
     } else {
         None
     };
-    q::JS_SetCanCompileStringsHook(cx.rt, hook, cx as *mut Cx as *mut c_void);
+    q::JS_SetCanCompileStringsHook(cx.rt, hook, cx.as_raw() as *mut c_void);
     let code_for_eval_hook: q::JSCodeForEvalHook =
         if !callbacks.is_null() && (*callbacks).codeForEvalGets.is_some() {
             Some(code_for_eval)
         } else {
             None
         };
-    q::JS_SetCodeForEvalHook(cx.rt, code_for_eval_hook, cx as *mut Cx as *mut c_void);
+    q::JS_SetCodeForEvalHook(cx.rt, code_for_eval_hook, cx.as_raw() as *mut c_void);
 }
 
 pub(crate) unsafe fn JS_GetSecurityCallbacks(
     cx: *mut root::JSContext,
 ) -> *const root::JSSecurityCallbacks {
-    Cx::from_raw(cx).hooks.security_callbacks
+    Cx::from_raw(cx).hooks.security_callbacks.get()
 }
 
 pub(crate) unsafe fn JS_SetTrustedPrincipals(
@@ -815,7 +819,7 @@ unsafe extern "C" fn code_for_eval(
     opaque: *mut c_void,
 ) -> q::JSValue {
     let cx = hook_cx(opaque);
-    let Some(gets) = (*cx.hooks.security_callbacks).codeForEvalGets else {
+    let Some(gets) = (*cx.hooks.security_callbacks.get()).codeForEvalGets else {
         return q::JS_UNDEFINED;
     };
     let entered = enter_qctx(cx, ctx);
@@ -854,7 +858,7 @@ unsafe extern "C" fn can_compile_strings(
     opaque: *mut c_void,
 ) -> c_int {
     let cx = hook_cx(opaque);
-    let Some(allows) = (*cx.hooks.security_callbacks).contentSecurityPolicyAllows else {
+    let Some(allows) = (*cx.hooks.security_callbacks.get()).contentSecurityPolicyAllows else {
         return 1;
     };
     let entered = enter_qctx(cx, ctx);

@@ -58,7 +58,7 @@ fn is_exception(v: q::JSValue) -> bool {
 }
 
 /// Stores a QuickJS result (a new reference) in `out`; false if it is an exception.
-unsafe fn set_result(cx: &mut Cx, v: q::JSValue, out: root::JS::MutableHandleValue) -> bool {
+unsafe fn set_result(cx: &Cx, v: q::JSValue, out: root::JS::MutableHandleValue) -> bool {
     if is_exception(v) {
         return false;
     }
@@ -95,10 +95,10 @@ unsafe fn free_desc(cx: &Cx, qd: &q::JSPropertyDescriptor) {
 
 /// Calls `f` with the own property keys of `obj` (`JS_GPN_*` flags) and their enumerability.
 unsafe fn for_each_own_key(
-    cx: &mut Cx,
+    cx: &Cx,
     obj: q::JSValue,
     flags: u32,
-    mut f: impl FnMut(&mut Cx, q::JSAtom, bool),
+    mut f: impl FnMut(&Cx, q::JSAtom, bool),
 ) -> bool {
     let qctx = cx.qctx();
     let mut tab: *mut q::JSPropertyEnum = ptr::null_mut();
@@ -116,7 +116,7 @@ unsafe fn for_each_own_key(
 }
 
 /// The id of `atom`; a string or symbol atom is kept alive by the pool.
-unsafe fn retained_id(cx: &mut Cx, atom: q::JSAtom) -> root::jsid {
+unsafe fn retained_id(cx: &Cx, atom: q::JSAtom) -> root::jsid {
     let id = crate::sys::jsid::from_atom(atom);
     if id.is_string() || id.is_symbol() {
         cx.adopt_atom(q::JS_DupAtom(cx.base_ctx, atom));
@@ -926,7 +926,7 @@ pub(crate) unsafe fn JS_ValueToFunction(
 
 /// The value of the own data property `name` of `obj` (a new reference), `JS_UNDEFINED` if there
 /// is none, or `JS_EXCEPTION`.
-unsafe fn own_data_property(cx: &mut Cx, obj: *mut root::JSObject, name: &CStr) -> q::JSValue {
+unsafe fn own_data_property(cx: &Cx, obj: *mut root::JSObject, name: &CStr) -> q::JSValue {
     let atom = Atom::from_cstr(cx, name.as_ptr());
     let mut qd: q::JSPropertyDescriptor = std::mem::zeroed();
     let r = q::JS_GetOwnProperty(cx.qctx(), &mut qd, obj_val(obj), atom.atom);
@@ -1165,13 +1165,13 @@ pub(crate) unsafe fn Construct1(
 
 /// `%Class.prototype%[name]` of the current realm as it was when the realm was created (a new
 /// reference); see `intrinsics.rs`.
-unsafe fn intrinsic(cx: &mut Cx, class: q::JSClassID, name: &'static CStr) -> q::JSValue {
+unsafe fn intrinsic(cx: &Cx, class: q::JSClassID, name: &'static CStr) -> q::JSValue {
     intrinsics::get(cx, Intrinsic::Method(class, name))
 }
 
 /// Calls `%Class.prototype%[name]` on `this` (a new reference or `JS_EXCEPTION`).
 unsafe fn call_method(
-    cx: &mut Cx,
+    cx: &Cx,
     class: q::JSClassID,
     name: &'static CStr,
     this: q::JSValue,
@@ -1189,7 +1189,7 @@ unsafe fn call_method(
 
 /// Calls the getter `%Class.prototype%[name]` with receiver `this`.
 unsafe fn call_getter(
-    cx: &mut Cx,
+    cx: &Cx,
     class: q::JSClassID,
     name: &'static CStr,
     this: q::JSValue,
@@ -1201,7 +1201,7 @@ unsafe fn call_getter(
 }
 
 /// `new %Class%(...args)` (a new reference or `JS_EXCEPTION`).
-unsafe fn construct_intrinsic(cx: &mut Cx, class: q::JSClassID, args: &[q::JSValue]) -> q::JSValue {
+unsafe fn construct_intrinsic(cx: &Cx, class: q::JSClassID, args: &[q::JSValue]) -> q::JSValue {
     let ctor = intrinsic(cx, class, c"constructor");
     if is_exception(ctor) {
         return ctor;
@@ -1591,7 +1591,7 @@ fn regexp_flags(flags: root::JS::RegExpFlags) -> Vec<u8> {
 
 /// `new RegExp(source, flags)` (a new reference or `JS_EXCEPTION`).
 unsafe fn new_regexp(
-    cx: &mut Cx,
+    cx: &Cx,
     chars: *const u16,
     length: usize,
     flags: root::JS::RegExpFlags,
@@ -1651,7 +1651,7 @@ pub(crate) unsafe fn CheckRegExpSyntax(
 }
 
 /// `ToNumber(obj[name])`, or `None` with an exception pending.
-unsafe fn number_property(cx: &mut Cx, obj: q::JSValue, name: &CStr) -> Option<f64> {
+unsafe fn number_property(cx: &Cx, obj: q::JSValue, name: &CStr) -> Option<f64> {
     let v = q::JS_GetPropertyStr(cx.qctx(), obj, name.as_ptr());
     if is_exception(v) {
         return None;
@@ -1667,7 +1667,7 @@ unsafe fn number_property(cx: &mut Cx, obj: q::JSValue, name: &CStr) -> Option<f
 }
 
 /// The length of the matched substring of a match array.
-unsafe fn match_length(cx: &mut Cx, result: q::JSValue) -> Option<f64> {
+unsafe fn match_length(cx: &Cx, result: q::JSValue) -> Option<f64> {
     let matched = q::JS_GetPropertyUint32(cx.qctx(), result, 0);
     if is_exception(matched) {
         return None;

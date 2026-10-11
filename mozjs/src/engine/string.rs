@@ -117,21 +117,21 @@ unsafe fn u16_strlen(s: *const u16) -> usize {
 }
 
 /// Hands a new string reference (or `JS_EXCEPTION`) to Rust.
-unsafe fn adopt_string(cx: &mut Cx, v: q::JSValue) -> *mut root::JSString {
+unsafe fn adopt_string(cx: &Cx, v: q::JSValue) -> *mut root::JSString {
     if v.tag() == q::JS_TAG_EXCEPTION {
         return ptr::null_mut();
     }
     cx.adopt(v).to_string()
 }
 
-pub(crate) unsafe fn new_latin1_string(cx: &mut Cx, chars: &[u8]) -> *mut root::JSString {
+pub(crate) unsafe fn new_latin1_string(cx: &Cx, chars: &[u8]) -> *mut root::JSString {
     adopt_string(
         cx,
         q::JS_NewStringLatin1(cx.qctx(), chars.as_ptr(), chars.len()),
     )
 }
 
-pub(crate) unsafe fn new_utf16_string(cx: &mut Cx, chars: &[u16]) -> *mut root::JSString {
+pub(crate) unsafe fn new_utf16_string(cx: &Cx, chars: &[u16]) -> *mut root::JSString {
     adopt_string(
         cx,
         q::JS_NewStringUTF16(cx.qctx(), chars.as_ptr(), chars.len()),
@@ -139,7 +139,7 @@ pub(crate) unsafe fn new_utf16_string(cx: &mut Cx, chars: &[u16]) -> *mut root::
 }
 
 /// A string from UTF-8; malformed input throws, like SpiderMonkey.
-unsafe fn new_utf8_string(cx: &mut Cx, bytes: &[u8]) -> *mut root::JSString {
+unsafe fn new_utf8_string(cx: &Cx, bytes: &[u8]) -> *mut root::JSString {
     if std::str::from_utf8(bytes).is_err() {
         q::JS_ThrowTypeError(cx.qctx(), c"malformed UTF-8 character sequence".as_ptr());
         return ptr::null_mut();
@@ -533,7 +533,7 @@ pub(crate) unsafe fn JS_NewMaybeExternalStringUTF8(
 
 /// The atom of the new string reference `s` (consumed). Integer-like strings have no atom string
 /// (QuickJS makes them integer atoms) and are returned themselves.
-unsafe fn atomize(cx: &mut Cx, s: q::JSValue) -> *mut root::JSString {
+unsafe fn atomize(cx: &Cx, s: q::JSValue) -> *mut root::JSString {
     if s.tag() == q::JS_TAG_EXCEPTION {
         return ptr::null_mut();
     }
@@ -949,7 +949,7 @@ pub(crate) unsafe fn ToObjectSlow(
 }
 
 /// OrdinaryToPrimitive; a new reference or `JS_EXCEPTION`.
-unsafe fn ordinary_to_primitive(cx: &mut Cx, obj: q::JSValue, hint: root::JSType) -> q::JSValue {
+unsafe fn ordinary_to_primitive(cx: &Cx, obj: q::JSValue, hint: root::JSType) -> q::JSValue {
     let qctx = cx.qctx();
     let methods = if hint == root::JSType::JSTYPE_STRING {
         [c"toString", c"valueOf"]
@@ -977,7 +977,7 @@ unsafe fn ordinary_to_primitive(cx: &mut Cx, obj: q::JSValue, hint: root::JSType
 
 /// ToPrimitive of an object (`hint` `JSTYPE_UNDEFINED` is "default"); a new reference or
 /// `JS_EXCEPTION`.
-unsafe fn to_primitive(cx: &mut Cx, obj: q::JSValue, hint: root::JSType) -> q::JSValue {
+unsafe fn to_primitive(cx: &Cx, obj: q::JSValue, hint: root::JSType) -> q::JSValue {
     let qctx = cx.qctx();
     let atom = super::well_known_symbol_atom(cx, root::JS::SymbolCode::toPrimitive as usize);
     let exotic = q::JS_GetProperty(qctx, obj, atom);
@@ -1092,11 +1092,11 @@ pub(crate) unsafe fn StrictlyEqual(
 // Property keys.
 
 /// The id of a new atom reference, which the pool takes over.
-unsafe fn atom_id(cx: &mut Cx, atom: q::JSAtom) -> root::jsid {
+unsafe fn atom_id(cx: &Cx, atom: q::JSAtom) -> root::jsid {
     from_atom(cx.adopt_atom(atom))
 }
 
-unsafe fn value_to_id(cx: &mut Cx, v: q::JSValue, idp: *mut root::jsid) -> bool {
+unsafe fn value_to_id(cx: &Cx, v: q::JSValue, idp: *mut root::jsid) -> bool {
     let atom = q::JS_ValueToAtom(cx.qctx(), v);
     if atom == q::JS_ATOM_NULL {
         return false;
@@ -1329,7 +1329,7 @@ pub(crate) unsafe fn JS_IsIdentifier1(chars: *const u16, length: usize) -> bool 
 
 /// `JSON.parse(text, reviver)`; consumes `text`.
 unsafe fn parse_json(
-    cx: &mut Cx,
+    cx: &Cx,
     text: q::JSValue,
     reviver: q::JSValue,
     vp: root::JS::MutableHandleValue,
@@ -1427,7 +1427,7 @@ pub(crate) unsafe fn JS_ParseJSONWithReviver1(
 /// `JSON.stringify(value, replacer, space)`, handed to `callback` in one piece. An undefined
 /// result is written as "null" if `undefined_as_null`, and not written otherwise.
 unsafe fn stringify(
-    cx: &mut Cx,
+    cx: &Cx,
     value: JSVal,
     replacer: *mut root::JSObject,
     space: JSVal,
@@ -1569,7 +1569,7 @@ fn push_quoted(out: &mut Vec<u16>, chars: Chars) {
 }
 
 /// Calls `f` with the characters of `ToString(v)`.
-unsafe fn with_string_chars(cx: &mut Cx, v: q::JSValue, f: impl FnOnce(Chars)) -> bool {
+unsafe fn with_string_chars(cx: &Cx, v: q::JSValue, f: impl FnOnce(Chars)) -> bool {
     let s = q::JS_ToString(cx.qctx(), v);
     if s.tag() == q::JS_TAG_EXCEPTION {
         return false;
@@ -1579,12 +1579,12 @@ unsafe fn with_string_chars(cx: &mut Cx, v: q::JSValue, f: impl FnOnce(Chars)) -
     true
 }
 
-unsafe fn append_to_string(cx: &mut Cx, out: &mut Vec<u16>, v: q::JSValue) -> bool {
+unsafe fn append_to_string(cx: &Cx, out: &mut Vec<u16>, v: q::JSValue) -> bool {
     with_string_chars(cx, v, |c| out.extend(c.units()))
 }
 
 unsafe fn value_to_source(
-    cx: &mut Cx,
+    cx: &Cx,
     v: q::JSValue,
     seen: &mut Vec<*mut c_void>,
     out: &mut Vec<u16>,
@@ -1611,7 +1611,7 @@ unsafe fn value_to_source(
 }
 
 /// `Symbol.iterator`, `Symbol.for("key")` or `Symbol("description")`.
-unsafe fn symbol_to_source(cx: &mut Cx, sym: q::JSValue, out: &mut Vec<u16>) -> bool {
+unsafe fn symbol_to_source(cx: &Cx, sym: q::JSValue, out: &mut Vec<u16>) -> bool {
     let qctx = cx.qctx();
     let atom = q::JS_ValueToAtom(qctx, sym);
     let well_known = (0..root::JS::SymbolCode::Limit as usize)
@@ -1655,7 +1655,7 @@ unsafe fn symbol_to_source(cx: &mut Cx, sym: q::JSValue, out: &mut Vec<u16>) -> 
 }
 
 unsafe fn object_to_source(
-    cx: &mut Cx,
+    cx: &Cx,
     obj: q::JSValue,
     seen: &mut Vec<*mut c_void>,
     out: &mut Vec<u16>,
@@ -1691,7 +1691,7 @@ unsafe fn object_to_source(
 }
 
 unsafe fn builtin_object_to_source(
-    cx: &mut Cx,
+    cx: &Cx,
     obj: q::JSValue,
     seen: &mut Vec<*mut c_void>,
     out: &mut Vec<u16>,
@@ -1731,7 +1731,7 @@ unsafe fn builtin_object_to_source(
 }
 
 unsafe fn array_to_source(
-    cx: &mut Cx,
+    cx: &Cx,
     obj: q::JSValue,
     seen: &mut Vec<*mut c_void>,
     out: &mut Vec<u16>,
@@ -1764,7 +1764,7 @@ unsafe fn array_to_source(
 }
 
 /// `(new TypeError("message", "file", line))`.
-unsafe fn error_to_source(cx: &mut Cx, obj: q::JSValue, out: &mut Vec<u16>) -> bool {
+unsafe fn error_to_source(cx: &Cx, obj: q::JSValue, out: &mut Vec<u16>) -> bool {
     let qctx = cx.qctx();
     let mut props = [q::JS_UNDEFINED; 4];
     for (p, name) in props
@@ -1800,7 +1800,7 @@ unsafe fn error_to_source(cx: &mut Cx, obj: q::JSValue, out: &mut Vec<u16>) -> b
     ok
 }
 
-unsafe fn key_to_source(cx: &mut Cx, atom: q::JSAtom, out: &mut Vec<u16>) -> bool {
+unsafe fn key_to_source(cx: &Cx, atom: q::JSAtom, out: &mut Vec<u16>) -> bool {
     if atom & ATOM_TAG_INT != 0 {
         push_str(out, &(atom & !ATOM_TAG_INT).to_string());
         return true;
@@ -1826,7 +1826,7 @@ unsafe fn key_to_source(cx: &mut Cx, atom: q::JSAtom, out: &mut Vec<u16>) -> boo
 
 /// `({key:value, get accessor() {...}})` over the own enumerable properties.
 unsafe fn plain_object_to_source(
-    cx: &mut Cx,
+    cx: &Cx,
     obj: q::JSValue,
     seen: &mut Vec<*mut c_void>,
     out: &mut Vec<u16>,

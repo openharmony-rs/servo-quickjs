@@ -285,18 +285,18 @@ pub(crate) unsafe fn new_key_object(qctx: *mut q::JSContext) -> q::JSValue {
 }
 
 /// The key object of the current realm, or the runtime's outside any realm (not counted).
-pub(crate) unsafe fn key_object(cx: &mut Cx) -> q::JSValue {
+pub(crate) unsafe fn key_object(cx: &Cx) -> q::JSValue {
     let realm = cx.current_realm();
     if !realm.is_null() {
         if let Some(data) = object_data((*realm).global) {
             return *data.slots.last().unwrap();
         }
     }
-    cx.base_key_object
+    cx.base_key_object.get()
 }
 
 /// An intrinsic of the current realm (a new reference).
-pub(crate) unsafe fn get(cx: &mut Cx, which: Intrinsic) -> q::JSValue {
+pub(crate) unsafe fn get(cx: &Cx, which: Intrinsic) -> q::JSValue {
     let index = INTRINSICS
         .iter()
         .position(|&i| i == which)
@@ -306,7 +306,7 @@ pub(crate) unsafe fn get(cx: &mut Cx, which: Intrinsic) -> q::JSValue {
 }
 
 /// A new holder map (`NewWeakMapObject`).
-pub(crate) unsafe fn new_holder_map(cx: &mut Cx) -> q::JSValue {
+pub(crate) unsafe fn new_holder_map(cx: &Cx) -> q::JSValue {
     let obj = q::JS_NewObjectProtoClass(cx.qctx(), q::JS_NULL, holder_map_class(cx.rt));
     let id = NEXT_HOLDER_MAP_ID.fetch_add(1, Ordering::Relaxed);
     q::JS_SetOpaque(obj, id as usize as *mut c_void);

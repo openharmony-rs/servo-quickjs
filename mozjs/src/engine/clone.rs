@@ -155,7 +155,7 @@ fn scerr_message(id: u32) -> &'static CStr {
 /// SpiderMonkey's `ReportDataCloneError`: the `reportError` callback if there is one (no
 /// exception is set), otherwise a TypeError.
 unsafe fn report_error(
-    cx: &mut Cx,
+    cx: &Cx,
     callbacks: *const root::JSStructuredCloneCallbacks,
     closure: *mut c_void,
     id: u32,
@@ -282,7 +282,7 @@ enum WriteFrame {
 
 /// What a `JSStructuredCloneWriter*` points to.
 struct Writer {
-    cx: *mut Cx,
+    cx: *const Cx,
     out: Vec<u8>,
     /// Objects seen so far and their indices.
     memory: HashMap<usize, u32>,
@@ -305,7 +305,7 @@ impl Drop for Writer {
 
 impl Writer {
     fn new(
-        cx: &mut Cx,
+        cx: &Cx,
         scope: root::JS::StructuredCloneScope,
         callbacks: *const root::JSStructuredCloneCallbacks,
         closure: *mut c_void,
@@ -322,8 +322,8 @@ impl Writer {
         }
     }
 
-    fn cx<'a>(&self) -> &'a mut Cx {
-        unsafe { &mut *self.cx }
+    fn cx<'a>(&self) -> &'a Cx {
+        unsafe { &*self.cx }
     }
 
     fn ctx(&self) -> *mut q::JSContext {
@@ -938,7 +938,7 @@ unsafe fn writer<'a>(w: *mut root::JSStructuredCloneWriter) -> &'a mut Writer {
 /// Serializes `v` with its transfer list; `None` on failure (exception pending or error
 /// reported).
 unsafe fn write_clone(
-    cx: &mut Cx,
+    cx: &Cx,
     v: q::JSValue,
     scope: root::JS::StructuredCloneScope,
     callbacks: *const root::JSStructuredCloneCallbacks,
@@ -992,7 +992,7 @@ impl ReadFrame {
 
 /// What a `JSStructuredCloneReader*` points to.
 struct Reader<'a> {
-    cx: *mut Cx,
+    cx: *const Cx,
     input: &'a [u8],
     pos: usize,
     /// One reference per object read, by index (`JS_UNDEFINED` while being created).
@@ -1012,8 +1012,8 @@ impl Drop for Reader<'_> {
 }
 
 impl<'a> Reader<'a> {
-    fn cx<'b>(&self) -> &'b mut Cx {
-        unsafe { &mut *self.cx }
+    fn cx<'b>(&self) -> &'b Cx {
+        unsafe { &*self.cx }
     }
 
     fn ctx(&self) -> *mut q::JSContext {
@@ -1501,7 +1501,7 @@ unsafe fn reader<'a>(r: *mut root::JSStructuredCloneReader) -> &'a mut Reader<'a
 
 /// Deserializes the bytes in `storage` (a new reference), marking its transfer map consumed.
 unsafe fn read_clone(
-    cx: &mut Cx,
+    cx: &Cx,
     storage: *mut Vec<u8>,
     policy: *const root::JS::CloneDataPolicy,
     callbacks: *const root::JSStructuredCloneCallbacks,

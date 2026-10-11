@@ -500,7 +500,7 @@ pub(crate) unsafe fn BuildStackString(
 
 /// Keeps `value` alive until the autorelease pool drains (end of the task), like the values the
 /// shim hands to Rust.
-unsafe fn pool_owned<T>(cx: &mut Cx, value: Box<T>) -> *mut T {
+unsafe fn pool_owned<T>(cx: &Cx, value: Box<T>) -> *mut T {
     unsafe extern "C" fn free<T>(_rt: *mut q::JSRuntime, opaque: *mut c_void, _ptr: *mut c_void) {
         drop(Box::from_raw(opaque as *mut T));
     }

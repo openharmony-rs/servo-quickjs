@@ -56,7 +56,7 @@ pub(crate) unsafe fn JS_AbortIfWrongThread(cx: *mut root::JSContext) {
 }
 
 pub(crate) unsafe fn GetWarningReporter(cx: *mut root::JSContext) -> root::JS::WarningReporter {
-    Cx::from_raw(cx).warning_reporter
+    Cx::from_raw(cx).warning_reporter.get()
 }
 
 // Permanent roots (Servo's `PermanentRoot`): one reference per rooted location.

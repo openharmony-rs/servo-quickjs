@@ -305,7 +305,7 @@ pub(crate) unsafe fn call_native(
     let Some(native) = native else {
         return q::JS_ThrowTypeError(ctx, c"not a function".as_ptr());
     };
-    let cx = &mut *(q::JS_GetRuntimeOpaque(q::JS_GetRuntime(ctx)) as *mut Cx);
+    let cx = &*(q::JS_GetRuntimeOpaque(q::JS_GetRuntime(ctx)) as *const Cx);
     // Values handed to Rust during the call are released when it returns, as SpiderMonkey's
     // rooted values die with the native's frame; otherwise a loop calling natives would grow the
     // pool until the end of the task.
@@ -459,7 +459,7 @@ unsafe extern "C" fn function_call(
 
 /// A new native function object (a new reference).
 pub(crate) unsafe fn new_function(
-    cx: &mut Cx,
+    cx: &Cx,
     native: root::JSNative,
     info: *const root::JSJitInfo,
     nargs: u32,
@@ -507,7 +507,7 @@ pub(crate) const QJS_CLASS_OBJECT: q::JSClassID = 1;
 
 /// Creates an object of SpiderMonkey class `clasp` with prototype `proto` (a new reference).
 pub(crate) unsafe fn new_object(
-    cx: &mut Cx,
+    cx: &Cx,
     clasp: *const root::JSClass,
     proto: q::JSValue,
 ) -> q::JSValue {
@@ -561,7 +561,7 @@ pub(crate) unsafe fn JS_NewPlainObject(cx: *mut root::JSContext) -> *mut root::J
 }
 
 /// Retains a new object reference in the pool and returns the pointer (null on exception).
-pub(crate) unsafe fn adopt_object(cx: &mut Cx, obj: q::JSValue) -> *mut root::JSObject {
+pub(crate) unsafe fn adopt_object(cx: &Cx, obj: q::JSValue) -> *mut root::JSObject {
     if obj.tag() == q::JS_TAG_EXCEPTION {
         return ptr::null_mut();
     }

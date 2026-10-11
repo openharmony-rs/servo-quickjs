@@ -18,6 +18,7 @@ use servo_quickjs as q;
 
 use crate::sys::jsapi as root;
 use crate::sys::jsval::JSVal;
+use reentrant::Stack;
 
 mod atom;
 mod buffer;
@@ -37,6 +38,7 @@ mod promise;
 mod property;
 mod proxy;
 mod realm;
+mod reentrant;
 mod runtime;
 mod string;
 pub(crate) mod verify;
@@ -59,20 +61,24 @@ pub(crate) use runtime::*;
 pub(crate) use string::*;
 
 /// What a SpiderMonkey `JSContext*` points to: one per QuickJS runtime (one per thread).
+///
+/// Only ever reached through shared references: natives, hooks and finalizers that run during a
+/// call into QuickJS reach it again through `current()`, so the state they change is in cells
+/// (see `reentrant.rs`).
 pub(crate) struct Cx {
     pub rt: *mut q::JSRuntime,
     /// A context without a global of ours, for operations outside any realm.
     pub base_ctx: *mut q::JSContext,
     /// Entered realms, innermost last; each holds a reference (see `enter_realm`).
-    pub realm_stack: Vec<*mut RealmData>,
+    pub realm_stack: Stack<*mut RealmData>,
     /// Values (and atoms) handed to Rust during the current task; see `retain`.
-    pub pool: Vec<q::JSValue>,
-    pub atom_pool: Vec<q::JSAtom>,
-    pub warning_reporter: root::JS::WarningReporter,
+    pub pool: Stack<q::JSValue>,
+    pub atom_pool: Stack<q::JSAtom>,
+    pub warning_reporter: Cell<root::JS::WarningReporter>,
     /// Job queue, promise rejection tracking, interrupts and security callbacks.
     pub hooks: promise::RuntimeHooks,
     /// The key object of `base_ctx` (counted), for intrinsics outside any realm.
-    pub base_key_object: q::JSValue,
+    pub base_key_object: Cell<q::JSValue>,
 }
 
 /// What a SpiderMonkey `JS::Realm*` (and `JS::Compartment*`) points to. Owned by its QuickJS
@@ -92,33 +98,33 @@ pub(crate) struct RealmData {
 thread_local!(static CURRENT: Cell<*mut Cx> = const { Cell::new(ptr::null_mut()) });
 
 impl Cx {
-    pub fn from_raw<'a>(cx: *mut root::JSContext) -> &'a mut Cx {
+    pub fn from_raw<'a>(cx: *mut root::JSContext) -> &'a Cx {
         assert!(!cx.is_null());
-        unsafe { &mut *(cx as *mut Cx) }
+        unsafe { &*(cx as *const Cx) }
     }
 
-    pub fn as_raw(&mut self) -> *mut root::JSContext {
-        self as *mut Cx as *mut root::JSContext
+    pub fn as_raw(&self) -> *mut root::JSContext {
+        self as *const Cx as *mut root::JSContext
     }
 
     /// The QuickJS context of the current realm, or the base context outside any realm.
     pub fn qctx(&self) -> *mut q::JSContext {
         match self.realm_stack.last() {
-            Some(realm) => unsafe { (**realm).qctx },
+            Some(realm) => unsafe { (*realm).qctx },
             None => self.base_ctx,
         }
     }
 
     pub fn current_realm(&self) -> *mut RealmData {
-        self.realm_stack.last().copied().unwrap_or(ptr::null_mut())
+        self.realm_stack.last().unwrap_or(ptr::null_mut())
     }
 
     /// Makes `realm` current, and keeps it alive, until the matching `leave_realm`.
-    pub unsafe fn enter_realm(&mut self, realm: *mut RealmData) {
+    pub unsafe fn enter_realm(&self, realm: *mut RealmData) {
         self.realm_stack.push(hold_realm(realm));
     }
 
-    pub unsafe fn leave_realm(&mut self) {
+    pub unsafe fn leave_realm(&self) {
         let realm = self
             .realm_stack
             .pop()
@@ -129,12 +135,12 @@ impl Cx {
     /// Keeps `v` alive until the pool is drained (end of task), and returns it. Ropes are
     /// flattened, so values Rust sees never carry `JS_TAG_STRING_ROPE`.
     #[cfg_attr(qjs_pool_stats, track_caller)]
-    pub fn retain(&mut self, v: JSVal) -> JSVal {
+    pub fn retain(&self, v: JSVal) -> JSVal {
         self.retain_as(v, Pooled::Borrowed)
     }
 
     #[cfg_attr(qjs_pool_stats, track_caller)]
-    fn retain_as(&mut self, v: JSVal, pooled: Pooled) -> JSVal {
+    fn retain_as(&self, v: JSVal, pooled: Pooled) -> JSVal {
         let qv = v.to_qjs();
         if !qv.has_ref_count() {
             return v;
@@ -145,12 +151,12 @@ impl Cx {
 
     /// Like `retain`, but takes over a reference the caller owns (e.g. a QuickJS API result).
     #[cfg_attr(qjs_pool_stats, track_caller)]
-    pub fn adopt(&mut self, qv: q::JSValue) -> JSVal {
+    pub fn adopt(&self, qv: q::JSValue) -> JSVal {
         self.adopt_as(qv, Pooled::Result)
     }
 
     #[cfg_attr(qjs_pool_stats, track_caller)]
-    fn adopt_as(&mut self, qv: q::JSValue, pooled: Pooled) -> JSVal {
+    fn adopt_as(&self, qv: q::JSValue, pooled: Pooled) -> JSVal {
         if !qv.has_ref_count() {
             return JSVal::from_qjs(qv);
         }
@@ -168,21 +174,32 @@ impl Cx {
     /// Takes over a reference to `qv` until the pool is drained.
     #[cfg_attr(qjs_pool_stats, track_caller)]
     #[cfg_attr(not(qjs_pool_stats), allow(unused_variables))]
-    fn push_pool(&mut self, qv: q::JSValue, pooled: Pooled) {
+    fn push_pool(&self, qv: q::JSValue, pooled: Pooled) {
         self.pool.push(qv);
         verify::pooled(qv, 1);
         #[cfg(qjs_pool_stats)]
         pool_stats::pushed(qv, pooled, std::panic::Location::caller());
     }
 
-    pub fn adopt_atom(&mut self, atom: q::JSAtom) -> q::JSAtom {
+    pub fn adopt_atom(&self, atom: q::JSAtom) -> q::JSAtom {
         self.atom_pool.push(atom);
         atom
     }
 
-    /// Releases the values retained since `mark` (see `pool_mark`).
-    pub fn drain_pool(&mut self, mark: (usize, usize)) {
-        unsafe { drain_pool(self, mark) }
+    /// Releases the values retained since `mark` (see `pool_mark`). The frees can run finalizers
+    /// that release more values into the pool (`release_object`), which are drained too.
+    pub fn drain_pool(&self, mark: (usize, usize)) {
+        while self.pool.len() > mark.0 {
+            let v = self.pool.pop().unwrap();
+            #[cfg(qjs_pool_stats)]
+            pool_stats::popped(v);
+            verify::pooled(v, -1);
+            unsafe { q::JS_FreeValueRT(self.rt, v) };
+        }
+        while self.atom_pool.len() > mark.1 {
+            let a = self.atom_pool.pop().unwrap();
+            unsafe { q::JS_FreeAtomRT(self.rt, a) };
+        }
     }
 
     pub fn pool_mark(&self) -> (usize, usize) {
@@ -192,21 +209,21 @@ impl Cx {
 
 /// The runtime of the current thread.
 #[inline]
-pub(crate) fn current<'a>() -> &'a mut Cx {
+pub(crate) fn current<'a>() -> &'a Cx {
     let cx = CURRENT.with(|c| c.get());
     assert!(!cx.is_null(), "no QuickJS runtime on this thread");
-    unsafe { &mut *cx }
+    unsafe { &*cx }
 }
 
 /// The runtime of the current thread, or `None` once it has been destroyed. Like SpiderMonkey's
 /// shutdown GC, destroying a runtime frees every object, so later releases must do nothing.
 #[inline]
-pub(crate) fn try_current<'a>() -> Option<&'a mut Cx> {
+pub(crate) fn try_current<'a>() -> Option<&'a Cx> {
     let cx = CURRENT.with(|c| c.get());
     if cx.is_null() {
         None
     } else {
-        Some(unsafe { &mut *cx })
+        Some(unsafe { &*cx })
     }
 }
 
@@ -301,32 +318,11 @@ pub(crate) unsafe fn release_object(obj: *mut root::JSObject) {
     }
 }
 
-// A drain frees values whose finalizers may release more values into the pool through
-// `current()` (`release_object` defers a last release there). The loop reads the pool through a
-// raw pointer, in a function that isn't inlined, so that optimized builds reload it after each
-// free. That only avoids the miscompile: callers still hold a `&mut Cx` while the finalizers take
-// another one, which a follow-up removes by reaching `Cx` through shared references only.
-#[inline(never)]
-unsafe fn drain_pool(cx: *mut Cx, mark: (usize, usize)) {
-    while (*cx).pool.len() > mark.0 {
-        let v = (*cx).pool.pop().unwrap();
-        #[cfg(qjs_pool_stats)]
-        pool_stats::popped(v);
-        verify::pooled(v, -1);
-        q::JS_FreeValueRT((*cx).rt, v);
-    }
-    while (*cx).atom_pool.len() > mark.1 {
-        let a = (*cx).atom_pool.pop().unwrap();
-        q::JS_FreeAtomRT((*cx).rt, a);
-    }
-}
-
 pub(crate) fn drain_current_pool() {
-    let cx = CURRENT.with(|c| c.get());
-    if !cx.is_null() {
+    if let Some(cx) = try_current() {
         #[cfg(qjs_pool_stats)]
-        pool_stats::task_drained(unsafe { (*cx).pool.len() });
-        unsafe { (*cx).drain_pool((0, 0)) };
+        pool_stats::task_drained(cx.pool.len());
+        cx.drain_pool((0, 0));
     }
 }
 
