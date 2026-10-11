@@ -105,6 +105,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 name = "mozjs"
 version = "0.26.7"
 dependencies = [
+ "cc",
  "encoding_rs",
  "libc",
  "log",

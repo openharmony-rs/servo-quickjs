@@ -33,4 +33,5 @@ num-traits = "0.2"
 servo-quickjs = { path = "../servo-quickjs" }
 
 [build-dependencies]
+cc = "1.2"
 pkg-config = "0.3.34"
