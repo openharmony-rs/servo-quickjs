@@ -6,7 +6,7 @@
 //!
 //! QuickJS has no `Intl` and ignores locales and options in `toLocaleString`, `localeCompare` and
 //! the like. The OpenHarmony NDK exports ICU4C's C API (`libicu.so`), and so does the system ICU of
-//! other Linux, so there this adds:
+//! glibc Linux, so there this adds:
 //! - `Intl.Collator` and `String.prototype.localeCompare` (`ucol`);
 //! - `Intl.NumberFormat` and `Number.prototype.toLocaleString` (`unum`: the NDK exports
 //!   `unumf_formatDouble` but not `unumf_openResult`, so number skeletons cannot be used);
@@ -21,8 +21,9 @@
 //! - `String.prototype.toLocale{Upper,Lower}Case` (`u_strToUpper`/`u_strToLower`);
 //! - `Intl.getCanonicalLocales` and `supportedLocalesOf`.
 //!
-//! A system ICU has the pattern generator and number skeletons, but Linux uses the same code as
-//! OpenHarmony, so that a desktop build behaves like the device.
+//! A system ICU has the pattern generator and number skeletons, but Linux uses the same code and
+//! table as OpenHarmony, so that component options give the device's results. Styles, numbers and
+//! names come from the system ICU's data there.
 //!
 //! The default time zone is the one `Date` uses: `TZ`, else `OH_TimeService_GetTimeZone` on
 //! OpenHarmony, where ICU's default outside app processes is only a guess, and ICU's on Linux.

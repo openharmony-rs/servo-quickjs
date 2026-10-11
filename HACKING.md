@@ -45,6 +45,7 @@ Design: `docs/design.md`. Read it first.
 - `just test` (`QJS_TARGET_DIR` sets the target dir), and `just test-verify` with the tracing verifier.
 - The mozjs 0.26.7 tests are in `mozjs/tests/` (see `mozjs/upstream-tests/README.md` for the local changes).
 - Add focused tests for your area as `mozjs/tests/qjs_<area>.rs`.
+- `qjs_intl` expects ICU 74's data, on Linux the system ICU's (Ubuntu 24.04's).
 
 ## Commits
 

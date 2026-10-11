@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-//! QuickJS shim: the Intl subset over the OS's ICU (OpenHarmony and Linux; elsewhere QuickJS has
-//! no Intl). The expected strings follow ICU 74 (CLDR 44.1), the ICU of OpenHarmony 7.0 and of
-//! Ubuntu 24.04.
+//! QuickJS shim: the Intl subset over the OS's ICU (OpenHarmony and glibc Linux; elsewhere QuickJS
+//! has no Intl). The expected strings follow OpenHarmony 7.0's ICU 74 data, which the date pattern
+//! table comes from, and on Linux also need ICU 74's data for the rest (Ubuntu 24.04's).
 
 use std::ptr::{self, NonNull};
 
