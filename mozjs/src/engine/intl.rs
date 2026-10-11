@@ -14,7 +14,7 @@
 //!   `dateStyle`/`timeStyle` use ICU's styles. Component options (`{month: "short"}`) need a
 //!   pattern generator, which the NDK lacks (`udatpg`): `intl/dtpg.rs` ports ICU's over the CLDR
 //!   availableFormats of a fixed locale list (`intl/patterns.rs`: en-US, en-GB, zh-CN, zh-TW,
-//!   zh-HK, ja, ko, de, fr, es, ru; see `tools/gen_intl_patterns.py` to add one).
+//!   zh-HK, ja, ko, de, fr, es, ru, en-CA, sv-SE; see `tools/gen_intl_patterns.py` to add one).
 //!   Other locales get ICU's style patterns of the locale plus root's availableFormats. As in
 //!   SpiderMonkey, formatted dates and times have spaces for CLDR's narrow and thin spaces.
 //! - `String.prototype.toLocale{Upper,Lower}Case` (`u_strToUpper`/`u_strToLower`);

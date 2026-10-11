@@ -252,8 +252,7 @@ unsafe fn dates(cx: &mut JSContext, global: HandleObject) {
     check(cx, global, &cases);
 }
 
-/// The web compatibility requirements of WPT's ecmascript/locale-compat.html, which browsers meet
-/// by changing ICU's output.
+/// The web compatibility requirements of WPT's ecmascript/locale-compat.html.
 #[cfg(qjs_intl)]
 unsafe fn web_compat(cx: &mut JSContext, global: HandleObject) {
     check(
@@ -271,6 +270,18 @@ unsafe fn web_compat(cx: &mut JSContext, global: HandleObject) {
             (
                 r#"new Intl.DateTimeFormat("en-US", {hour: "numeric", minute: "2-digit", timeZone: "UTC"}).formatToParts(0).map(p => p.value).join("|")"#,
                 "12|:|00| |AM",
+            ),
+            (
+                r#"new Date("2022-03-31T23:59:42").toLocaleString("en-CA").startsWith("2022-03-31")"#,
+                "true",
+            ),
+            (
+                r#"new Date("2022-03-31T23:59:42").toLocaleString("en-CA", {dateStyle: "short"})"#,
+                "2022-03-31",
+            ),
+            (
+                r#"new Intl.DateTimeFormat("sv-SE").format(new Date("1970-01-01T00:00:00"))"#,
+                "1970-01-01",
             ),
         ],
     );

@@ -27,6 +27,8 @@ LOCALES = [
     ("fr_FR", "fr_Latn_FR"),
     ("es_ES", "es_Latn_ES"),
     ("ru_RU", "ru_Cyrl_RU"),
+    ("en_CA", "en_Latn_CA"),
+    ("sv_SE", "sv_Latn_SE"),
 ]
 
 # UDateTimePatternField order (dtptngen.cpp CLDR_FIELD_APPEND / CLDR_FIELD_NAME)
