@@ -84,8 +84,9 @@ struct Internals {
     /// Counted, in the order of `INTRINSICS`.
     intrinsics: Box<[q::JSValue]>,
     /// Counted: the cross-origin property holders of the realm, by the id of the holder map
-    /// (`NewWeakMapObject`) of the object they were made for.
-    holders: HashMap<u64, q::JSValue>,
+    /// (`NewWeakMapObject`) of the object they were made for. Only borrowed for map operations,
+    /// never across a call into QuickJS: a GC (any allocation can start one) marks it.
+    holders: RefCell<HashMap<u64, q::JSValue>>,
 }
 
 static INTERNALS_CLASS: OnceLock<q::JSClassID> = OnceLock::new();
@@ -119,14 +120,13 @@ fn forget_entry(maps: &mut HolderMaps, id: u64) {
 
 /// Drops the entries of freed holder maps from a key object, and returns their holders. The caller
 /// frees them once it is done with `internals`: freeing can run finalizers.
-fn purge(internals: &mut Internals) -> Vec<q::JSValue> {
+fn purge(holders: &mut HashMap<u64, q::JSValue>) -> Vec<q::JSValue> {
     let freed: Vec<u64> = HOLDER_MAPS.with(|m| {
         let m = m.borrow();
         if m.freed.is_empty() {
             return Vec::new();
         }
-        internals
-            .holders
+        holders
             .keys()
             .copied()
             .filter(|id| m.freed.contains(id))
@@ -135,7 +135,7 @@ fn purge(internals: &mut Internals) -> Vec<q::JSValue> {
     freed
         .into_iter()
         .filter_map(|id| {
-            let holder = internals.holders.remove(&id)?;
+            let holder = holders.remove(&id)?;
             HOLDER_MAPS.with(|m| forget_entry(&mut m.borrow_mut(), id));
             Some(holder)
         })
@@ -186,22 +186,23 @@ unsafe fn holder_map_class(rt: *mut q::JSRuntime) -> q::JSClassID {
     )
 }
 
-unsafe fn internals_of<'a>(v: q::JSValue) -> Option<&'a mut Internals> {
+unsafe fn internals_of<'a>(v: q::JSValue) -> Option<&'a Internals> {
     let id = *INTERNALS_CLASS.get()?;
-    (q::JS_GetOpaque(v, id) as *mut Internals).as_mut()
+    (q::JS_GetOpaque(v, id) as *const Internals).as_ref()
 }
 
 unsafe extern "C" fn internals_finalize(rt: *mut q::JSRuntime, val: q::JSValue) {
     let data = q::JS_GetOpaque(val, *INTERNALS_CLASS.get().unwrap()) as *mut Internals;
     if !data.is_null() {
         let data = Box::from_raw(data);
+        let holders = data.holders.take();
         let _ = HOLDER_MAPS.try_with(|m| {
             let mut m = m.borrow_mut();
-            for id in data.holders.keys() {
+            for id in holders.keys() {
                 forget_entry(&mut m, *id);
             }
         });
-        for v in data.intrinsics.iter().chain(data.holders.values()) {
+        for v in data.intrinsics.iter().chain(holders.values()) {
             q::JS_FreeValueRT(rt, *v);
         }
     }
@@ -224,7 +225,7 @@ unsafe extern "C" fn internals_gc_mark(
     mark: q::JS_MarkFunc,
 ) {
     if let Some(data) = internals_of(val) {
-        for v in data.intrinsics.iter().chain(data.holders.values()) {
+        for v in data.intrinsics.iter().chain(data.holders.borrow().values()) {
             if v.has_ref_count() {
                 q::JS_MarkValue(rt, *v, mark);
             }
@@ -281,7 +282,7 @@ pub(crate) unsafe fn new_key_object(qctx: *mut q::JSContext) -> q::JSValue {
     let obj = q::JS_NewObjectProtoClass(qctx, q::JS_NULL, internals_class(rt));
     let data = Box::new(Internals {
         intrinsics,
-        holders: HashMap::new(),
+        holders: Default::default(),
     });
     q::JS_SetOpaque(obj, Box::into_raw(data) as *mut c_void);
     obj
@@ -335,9 +336,12 @@ pub(crate) unsafe fn holder(
 ) -> Option<q::JSValue> {
     let id = holder_map_id(map)?;
     let internals = internals_of(key)?;
-    let purged = purge(internals);
-    let holder = match internals.holders.get(&id) {
-        Some(&v) => q::JS_DupValueRT(rt, v),
+    let (purged, holder) = {
+        let mut holders = internals.holders.borrow_mut();
+        (purge(&mut holders), holders.get(&id).copied())
+    };
+    let holder = match holder {
+        Some(v) => q::JS_DupValueRT(rt, v),
         None => q::JS_UNDEFINED,
     };
     for v in purged {
@@ -357,8 +361,11 @@ pub(crate) unsafe fn set_holder(
     let (Some(id), Some(internals)) = (holder_map_id(map), internals_of(key)) else {
         return false;
     };
-    let purged = purge(internals);
-    let old = internals.holders.insert(id, q::JS_DupValueRT(rt, value));
+    let new = q::JS_DupValueRT(rt, value);
+    let (purged, old) = {
+        let mut holders = internals.holders.borrow_mut();
+        (purge(&mut holders), holders.insert(id, new))
+    };
     if old.is_none() {
         HOLDER_MAPS.with(|m| *m.borrow_mut().entries.entry(id).or_default() += 1);
     }
