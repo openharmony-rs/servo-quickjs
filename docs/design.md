@@ -16,7 +16,7 @@ How it is built:
   - `PrivateValue(p)` is a `JS_TAG_FLOAT64` value whose bits are the pointer. It is never exposed to script.
 - **`*mut JSObject`** is the QuickJS object pointer, so `ObjectValue(o)` = `{ptr: o, tag: JS_TAG_OBJECT}`.
 - **`*mut JSString`** is a QuickJS `JSString*`. Ropes (`JS_TAG_STRING_ROPE`) are flattened before a `*mut JSString` is handed out (patch Q3).
-- **`*mut JSContext`** points to the shim's per-runtime `Cx`: the QuickJS `JSRuntime`, the realm stack, the pending exception, and the autorelease pool. Natives, hooks and finalizers that run during a call into QuickJS reach the same `Cx` again, so the shim only takes shared references to it, and the state they change (pools, realm stack, microtask queue, hooks) is in cells (`engine/reentrant.rs`).
+- **`*mut JSContext`** points to the shim's per-runtime `Cx`: the QuickJS `JSRuntime`, the realm stack, the pending exception, and the autorelease pool. Natives, hooks and finalizers that run during a call into QuickJS reach the same `Cx` again, so the shim only takes shared references to it, and the state they change (pools, realm stack, microtask queue, hooks) is in cells (`engine/reentrant.rs`). The same holds for the data behind objects' opaque pointers (reserved slots, proxy and microtask data): accessors return shared references, and the fields that change are `Cell`s. HACKING.md ("Re-entrancy") has the rules.
 - **`*mut JS::Realm`** and **`*mut JS::Compartment`** both point to a `RealmData`: the QuickJS `JSContext` plus the global. There is one compartment per realm.
 
 ## Ownership: counted storage plus a per-task pool
@@ -64,7 +64,7 @@ The cost is memory: values stay alive until the end of the task. A build with `Q
 ## Classes and objects
 
 - **Each distinct `*const JSClass`** gets a QuickJS class ID, registered lazily in a `HashMap<*const JSClass, JSClassID>`.
-- **The class's opaque pointer** is a shim-owned `ObjectData`: `reserved slots: Vec<Heap<JSVal>>` plus the `*const JSClass`. The slot count is `JSCLASS_RESERVED_SLOTS(flags)`. `DOM_OBJECT_SLOT` holds `PrivateValue(dom ptr)` as today.
+- **The class's opaque pointer** is a shim-owned `ObjectData`: the reserved slots, counted `Cell<JSValue>`s, plus the `*const JSClass` and the object's realm. The slot count is `JSCLASS_RESERVED_SLOTS(flags)`. `DOM_OBJECT_SLOT` holds `PrivateValue(dom ptr)` as today.
 - **QuickJS hooks map onto the SM class ops:**
 
   | QuickJS hook | Calls |

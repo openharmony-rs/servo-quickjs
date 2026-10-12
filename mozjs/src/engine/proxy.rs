@@ -185,8 +185,8 @@ struct ProxyData {
     /// Held (`hold_realm`) and marked.
     realm: *mut RealmData,
     /// The target of wrappers, the expando object of DOM proxies.
-    private: q::JSValue,
-    slots: Box<[q::JSValue]>,
+    private: Cell<q::JSValue>,
+    slots: Box<[Cell<q::JSValue>]>,
 }
 
 /// QuickJS class ids of proxies with a static and with a lazy prototype.
@@ -209,14 +209,14 @@ unsafe fn proxy_class_id(rt: *mut q::JSRuntime, lazy_proto: bool) -> q::JSClassI
     ids[lazy_proto as usize]
 }
 
-unsafe fn proxy_data<'a>(obj: *mut root::JSObject) -> Option<&'a mut ProxyData> {
+unsafe fn proxy_data<'a>(obj: *mut root::JSObject) -> Option<&'a ProxyData> {
     let ids = PROXY_CLASS_IDS.get()?;
     let v = obj_val(obj);
     let id = q::JS_GetClassID(v);
     if !ids.contains(&id) {
         return None;
     }
-    (q::JS_GetOpaque(v, id) as *mut ProxyData).as_mut()
+    (q::JS_GetOpaque(v, id) as *const ProxyData).as_ref()
 }
 
 unsafe fn proxy_handler<'a>(obj: *mut root::JSObject) -> Option<&'a ProxyHandler> {
@@ -261,8 +261,8 @@ unsafe fn new_proxy(
         handler,
         clasp,
         realm: super::hold_realm(cx.current_realm()),
-        private: q::JS_DupValueRT(cx.rt, private),
-        slots: vec![q::JS_UNDEFINED; reserved_slots(clasp)].into_boxed_slice(),
+        private: Cell::new(q::JS_DupValueRT(cx.rt, private)),
+        slots: vec![Cell::new(q::JS_UNDEFINED); reserved_slots(clasp)].into_boxed_slice(),
     });
     q::JS_SetOpaque(obj, Box::into_raw(data) as *mut c_void);
     class::adopt_object(cx, obj)
@@ -277,9 +277,9 @@ unsafe extern "C" fn proxy_finalize(rt: *mut q::JSRuntime, val: q::JSValue) {
         finalize(ptr::null_mut(), val_obj(val));
     }
     let data = Box::from_raw(data);
-    q::JS_FreeValueRT(rt, data.private);
+    q::JS_FreeValueRT(rt, data.private.get());
     for v in data.slots.iter() {
-        q::JS_FreeValueRT(rt, *v);
+        q::JS_FreeValueRT(rt, v.get());
     }
     super::release_realm(data.realm);
 }
@@ -290,8 +290,8 @@ unsafe extern "C" fn proxy_gc_mark(rt: *mut q::JSRuntime, val: q::JSValue, mark:
         return;
     }
     for v in std::iter::once(&(*data).private).chain((*data).slots.iter()) {
-        if v.has_ref_count() {
-            q::JS_MarkValue(rt, *v, mark);
+        if v.get().has_ref_count() {
+            q::JS_MarkValue(rt, v.get(), mark);
         }
     }
     super::mark_realm(rt, (*data).realm, mark);
@@ -339,7 +339,7 @@ impl ProxyRef {
     }
 
     unsafe fn target(&self) -> *mut root::JSObject {
-        obj_or_null(proxy_data(self.proxy).unwrap().private)
+        obj_or_null(proxy_data(self.proxy).unwrap().private.get())
     }
 
     /// Fails for operations a handler can't perform (dead wrappers, missing required traps).
@@ -911,8 +911,9 @@ unsafe fn unshadowed(ctx: *mut q::JSContext, obj: q::JSValue, atom: q::JSAtom) -
     if q::JS_HasPropertyCached(ctx, proto, atom, flags) != 1 {
         return Unshadowed::No;
     }
-    if data.private.tag() == q::JS_TAG_OBJECT {
-        match q::JS_GetOwnProperty(ctx, ptr::null_mut(), data.private, atom) {
+    let expando = data.private.get();
+    if expando.tag() == q::JS_TAG_OBJECT {
+        match q::JS_GetOwnProperty(ctx, ptr::null_mut(), expando, atom) {
             0 => {}
             1 => return Unshadowed::No,
             _ => return Unshadowed::Exception,
@@ -1131,9 +1132,9 @@ pub(crate) unsafe fn IsProxyHandlerFamily(obj: *mut root::JSObject) -> bool {
     proxy_handler(obj).is_some_and(|handler| handler.kind == Kind::Forwarding)
 }
 
-/// Stores `v` (counted) in `slot`. A raw pointer, not a `&mut` that would stay borrowed while the
-/// old value is freed: that can run finalizers that read this proxy's slots.
-unsafe fn set_counted(slot: *mut q::JSValue, v: JSVal) {
+/// Stores `v` (counted) in `slot`, and frees the old value: that can run finalizers that read this
+/// proxy's slots.
+unsafe fn set_counted(slot: &Cell<q::JSValue>, v: JSVal) {
     let rt = super::current().rt;
     let old = slot.replace(q::JS_DupValueRT(rt, v.to_qjs()));
     q::JS_FreeValueRT(rt, old);
@@ -1143,13 +1144,14 @@ pub(crate) unsafe fn GetProxyPrivate(obj: *mut root::JSObject, dest: *mut root::
     *dest = JSVal::from_qjs(
         proxy_data(obj)
             .expect("GetProxyPrivate on a non-proxy")
-            .private,
+            .private
+            .get(),
     );
 }
 
 pub(crate) unsafe fn SetProxyPrivate(obj: *mut root::JSObject, expando: *const root::JS::Value) {
     set_counted(
-        &mut proxy_data(obj)
+        &proxy_data(obj)
             .expect("SetProxyPrivate on a non-proxy")
             .private,
         *expando,
@@ -1164,7 +1166,8 @@ pub(crate) unsafe fn GetProxyReservedSlot(
     *dest = JSVal::from_qjs(
         proxy_data(obj)
             .expect("GetProxyReservedSlot on a non-proxy")
-            .slots[slot as usize],
+            .slots[slot as usize]
+            .get(),
     );
 }
 
@@ -1174,7 +1177,7 @@ pub(crate) unsafe fn SetProxyReservedSlot(
     val: *const root::JS::Value,
 ) {
     let data = proxy_data(obj).expect("SetProxyReservedSlot on a non-proxy");
-    set_counted(&mut data.slots[slot as usize], *val);
+    set_counted(&data.slots[slot as usize], *val);
 }
 
 pub(crate) unsafe fn SetDOMProxyInformation(
@@ -1293,7 +1296,7 @@ unsafe fn unwrap_one(obj: *mut root::JSObject, stop_at_window_proxy: bool) -> *m
     if !is_wrapper(obj) || (stop_at_window_proxy && IsWindowProxy(obj)) {
         return obj;
     }
-    obj_or_null(proxy_data(obj).unwrap().private)
+    obj_or_null(proxy_data(obj).unwrap().private.get())
 }
 
 unsafe fn unwrap(mut obj: *mut root::JSObject, stop_at_window_proxy: bool) -> *mut root::JSObject {
@@ -1460,7 +1463,7 @@ pub(crate) unsafe fn ToWindowProxyIfWindowSlow(obj: *mut root::JSObject) -> *mut
 
 pub(crate) unsafe fn ToWindowIfWindowProxy(obj: *mut root::JSObject) -> *mut root::JSObject {
     if IsWindowProxy(obj) {
-        obj_or_null(proxy_data(obj).unwrap().private)
+        obj_or_null(proxy_data(obj).unwrap().private.get())
     } else {
         obj
     }

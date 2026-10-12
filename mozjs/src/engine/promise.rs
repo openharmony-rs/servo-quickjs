@@ -397,8 +397,8 @@ pub(crate) unsafe fn JobQueueMayNotBeEmpty(cx: *mut root::JSContext) {
 /// Opaque data of `MicroTask` objects: a QuickJS promise job.
 struct MicroTaskData {
     job_func: q::JSJobFunc,
-    /// Counted; taken when the job runs.
-    args: Vec<q::JSValue>,
+    /// Counted; taken when the job runs. Only moved in and out of the cell, never borrowed.
+    args: Cell<Vec<q::JSValue>>,
     /// Held (`hold_realm`) and marked: the realm the job was enqueued in, which it runs in.
     realm: *mut RealmData,
     /// The incumbent global (counted), or `JS_UNDEFINED`: for a reaction, when it was created
@@ -429,17 +429,18 @@ unsafe fn microtask_class(rt: *mut q::JSRuntime) -> q::JSClassID {
     id
 }
 
-unsafe fn microtask_data<'a>(task: *mut root::JSObject) -> Option<&'a mut MicroTaskData> {
+unsafe fn microtask_data<'a>(task: *mut root::JSObject) -> Option<&'a MicroTaskData> {
     let id = *MICROTASK_CLASS.get()?;
-    (q::JS_GetOpaque(obj_val(task), id) as *mut MicroTaskData).as_mut()
+    (q::JS_GetOpaque(obj_val(task), id) as *const MicroTaskData).as_ref()
 }
 
 unsafe extern "C" fn microtask_finalize(rt: *mut q::JSRuntime, val: q::JSValue) {
     let data = q::JS_GetOpaque(val, *MICROTASK_CLASS.get().unwrap()) as *mut MicroTaskData;
     if !data.is_null() {
         let data = Box::from_raw(data);
-        for v in data.args.iter().chain([&data.incumbent, &data.promise]) {
-            q::JS_FreeValueRT(rt, *v);
+        let args = data.args.take();
+        for v in args.into_iter().chain([data.incumbent, data.promise]) {
+            q::JS_FreeValueRT(rt, v);
         }
         super::release_realm(data.realm);
     }
@@ -452,11 +453,13 @@ unsafe extern "C" fn microtask_gc_mark(
 ) {
     let data = q::JS_GetOpaque(val, *MICROTASK_CLASS.get().unwrap()) as *mut MicroTaskData;
     if let Some(data) = data.as_ref() {
-        for v in data.args.iter().chain([&data.incumbent, &data.promise]) {
+        let args = data.args.take();
+        for &v in args.iter().chain([&data.incumbent, &data.promise]) {
             if v.has_ref_count() {
-                q::JS_MarkValue(rt, *v, mark);
+                q::JS_MarkValue(rt, v, mark);
             }
         }
+        data.args.set(args);
         super::mark_realm(rt, data.realm, mark);
     }
 }
@@ -570,9 +573,11 @@ unsafe fn enqueue_microtask(
     }
     let data = Box::new(MicroTaskData {
         job_func,
-        args: (0..argc as usize)
-            .map(|i| q::JS_DupValueRT(cx.rt, *argv.add(i)))
-            .collect(),
+        args: Cell::new(
+            (0..argc as usize)
+                .map(|i| q::JS_DupValueRT(cx.rt, *argv.add(i)))
+                .collect(),
+        ),
         realm: super::hold_realm(realm),
         incumbent,
         // The promise of the reaction (Q30), for its user input state.
@@ -703,7 +708,7 @@ pub(crate) unsafe fn RunJSMicroTask(
         q::JS_ThrowTypeError(cx.qctx(), c"not a microtask".as_ptr());
         return false;
     };
-    let mut args = std::mem::take(&mut data.args);
+    let mut args = data.args.take();
     let ctx = if data.realm.is_null() {
         cx.base_ctx
     } else {

@@ -292,7 +292,7 @@ pub(crate) unsafe fn key_object(cx: &Cx) -> q::JSValue {
     let realm = cx.current_realm();
     if !realm.is_null() {
         if let Some(data) = object_data((*realm).global) {
-            return *data.slots.last().unwrap();
+            return data.slots.last().unwrap().get();
         }
     }
     cx.base_key_object.get()

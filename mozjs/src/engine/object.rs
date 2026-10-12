@@ -1060,7 +1060,7 @@ pub(crate) unsafe fn GetFunctionNativeReserved(
     which: usize,
 ) -> *const root::JS::Value {
     let data = function_data(fun).expect("GetFunctionNativeReserved on a non-native function");
-    &data.slots[which] as *const q::JSValue as *const root::JS::Value
+    data.slots[which].as_ptr() as *const root::JS::Value
 }
 
 pub(crate) unsafe fn SetFunctionNativeReserved(
@@ -1071,7 +1071,7 @@ pub(crate) unsafe fn SetFunctionNativeReserved(
     let cx = super::current();
     let data = function_data(fun).expect("SetFunctionNativeReserved on a non-native function");
     let new = q::JS_DupValueRT(cx.rt, (*val).to_qjs());
-    let old = std::mem::replace(&mut data.slots[which], new);
+    let old = data.slots[which].replace(new);
     q::JS_FreeValueRT(cx.rt, old);
 }
 

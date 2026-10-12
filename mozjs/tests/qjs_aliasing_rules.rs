@@ -14,8 +14,6 @@ use std::path::Path;
 /// no argument bounds. Every caller must end the borrow before calling into QuickJS or the
 /// embedder. Add a function here only after checking its callers, and prefer `&T` with cells.
 const MUT_ACCESSORS: &[(&str, &str)] = &[
-    ("class.rs", "function_data"),
-    ("class.rs", "object_data"),
     ("clone.rs", "data_vec"),
     ("clone.rs", "reader"),
     ("clone.rs", "writer"),
@@ -23,8 +21,6 @@ const MUT_ACCESSORS: &[(&str, &str)] = &[
     ("module.rs", "module_data"),
     ("module.rs", "module_of"),
     ("module.rs", "request_data"),
-    ("promise.rs", "microtask_data"),
-    ("proxy.rs", "proxy_data"),
 ];
 
 /// The engine sources, as (path in `src/engine`, lines without `//` comments).

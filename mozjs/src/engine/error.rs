@@ -10,7 +10,7 @@
 //! `message`, and their location from `fileName`/`lineNumber`/`columnNumber` (syntax errors) or
 //! the first frame of `stack`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr;
 
@@ -325,11 +325,11 @@ pub(crate) unsafe fn CaptureCurrentStack(
             None => q::JS_NULL,
         };
         let data = object_data(super::val_obj(obj)).unwrap();
-        data.slots[SAVED_FRAME_SOURCE] = source;
-        data.slots[SAVED_FRAME_LINE] = q::JS_NewUint32(qctx, frame.line);
-        data.slots[SAVED_FRAME_COLUMN] = q::JS_NewUint32(qctx, frame.column);
-        data.slots[SAVED_FRAME_NAME] = name;
-        data.slots[SAVED_FRAME_PARENT] = parent;
+        data.slots[SAVED_FRAME_SOURCE].set(source);
+        data.slots[SAVED_FRAME_LINE].set(q::JS_NewUint32(qctx, frame.line));
+        data.slots[SAVED_FRAME_COLUMN].set(q::JS_NewUint32(qctx, frame.column));
+        data.slots[SAVED_FRAME_NAME].set(name);
+        data.slots[SAVED_FRAME_PARENT].set(parent);
         parent = obj;
     }
     *stackp.ptr = if parent.tag() == q::JS_TAG_OBJECT {
@@ -341,7 +341,7 @@ pub(crate) unsafe fn CaptureCurrentStack(
 }
 
 /// The slots of a saved frame, or `None` if `frame` is not one.
-unsafe fn saved_frame<'a>(frame: *mut root::JSObject) -> Option<&'a [q::JSValue]> {
+unsafe fn saved_frame<'a>(frame: *mut root::JSObject) -> Option<&'a [Cell<q::JSValue>]> {
     if frame.is_null() || !ptr::eq(object_class(frame), &SAVED_FRAME_CLASS) {
         return None;
     }
@@ -372,7 +372,7 @@ pub(crate) unsafe fn GetSavedFrameSource(
         return root::JS::SavedFrameResult::AccessDenied;
     };
     *sourcep.ptr = cx
-        .retain(JSVal::from_qjs(slots[SAVED_FRAME_SOURCE]))
+        .retain(JSVal::from_qjs(slots[SAVED_FRAME_SOURCE].get()))
         .to_string();
     root::JS::SavedFrameResult::Ok
 }
@@ -389,7 +389,7 @@ pub(crate) unsafe fn GetSavedFrameLine(
         *linep = 0;
         return root::JS::SavedFrameResult::AccessDenied;
     };
-    *linep = uint_slot(slots[SAVED_FRAME_LINE]);
+    *linep = uint_slot(slots[SAVED_FRAME_LINE].get());
     root::JS::SavedFrameResult::Ok
 }
 
@@ -405,7 +405,7 @@ pub(crate) unsafe fn GetSavedFrameColumn(
         (*columnp).value_ = 0;
         return root::JS::SavedFrameResult::AccessDenied;
     };
-    (*columnp).value_ = uint_slot(slots[SAVED_FRAME_COLUMN]);
+    (*columnp).value_ = uint_slot(slots[SAVED_FRAME_COLUMN].get());
     root::JS::SavedFrameResult::Ok
 }
 
@@ -422,7 +422,7 @@ pub(crate) unsafe fn GetSavedFrameFunctionDisplayName(
     let Some(slots) = saved_frame(*savedFrame.ptr) else {
         return root::JS::SavedFrameResult::AccessDenied;
     };
-    let name = slots[SAVED_FRAME_NAME];
+    let name = slots[SAVED_FRAME_NAME].get();
     if name.tag() == q::JS_TAG_STRING {
         *namep.ptr = cx.retain(JSVal::from_qjs(name)).to_string();
     }
@@ -442,7 +442,7 @@ pub(crate) unsafe fn GetSavedFrameParent(
     let Some(slots) = saved_frame(*savedFrame.ptr) else {
         return root::JS::SavedFrameResult::AccessDenied;
     };
-    let parent = slots[SAVED_FRAME_PARENT];
+    let parent = slots[SAVED_FRAME_PARENT].get();
     if parent.tag() == q::JS_TAG_OBJECT {
         *parentp.ptr = cx.retain(JSVal::from_qjs(parent)).to_object();
     }
@@ -462,10 +462,10 @@ pub(crate) unsafe fn BuildStackString(
     let mut out = String::new();
     let mut frame = *stack.ptr;
     while let Some(slots) = saved_frame(frame) {
-        let source = value_to_string(cx, slots[SAVED_FRAME_SOURCE]).unwrap_or_default();
-        let line = uint_slot(slots[SAVED_FRAME_LINE]);
-        let column = uint_slot(slots[SAVED_FRAME_COLUMN]);
-        let name = slots[SAVED_FRAME_NAME];
+        let source = value_to_string(cx, slots[SAVED_FRAME_SOURCE].get()).unwrap_or_default();
+        let line = uint_slot(slots[SAVED_FRAME_LINE].get());
+        let column = uint_slot(slots[SAVED_FRAME_COLUMN].get());
+        let name = slots[SAVED_FRAME_NAME].get();
         let name = if name.tag() == q::JS_TAG_STRING {
             value_to_string(cx, name)
         } else {
@@ -481,7 +481,7 @@ pub(crate) unsafe fn BuildStackString(
             }
             (_, name) => out += &format!("{}@{source}:{line}:{column}\n", name.unwrap_or_default()),
         }
-        let parent = slots[SAVED_FRAME_PARENT];
+        let parent = slots[SAVED_FRAME_PARENT].get();
         frame = if parent.tag() == q::JS_TAG_OBJECT {
             super::val_obj(parent)
         } else {

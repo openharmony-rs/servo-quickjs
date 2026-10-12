@@ -249,9 +249,12 @@ pub(crate) unsafe fn JS_NewGlobalObject(
     GLOBALS.with(|g| g.borrow_mut().insert(global as usize, realm));
     // The global's data holds the realm instead of the creation reference: global and context
     // keep each other alive until the cycle collector frees both.
-    let mut data = super::class::ObjectData::new(clasp, realm);
+    let data = super::class::ObjectData::new(clasp, realm);
     // Before any script of the realm runs.
-    *data.slots.last_mut().unwrap() = super::intrinsics::new_key_object(qctx);
+    data.slots
+        .last()
+        .unwrap()
+        .set(super::intrinsics::new_key_object(qctx));
     q::JS_SetOpaque(obj_val(global), Box::into_raw(data) as *mut _);
     q::JS_FreeContext(qctx);
     cx.retain(JSVal::from_qjs(obj_val(global)));

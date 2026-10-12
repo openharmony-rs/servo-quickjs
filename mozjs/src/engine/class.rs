@@ -9,6 +9,7 @@
 //! write barriers maintain their counts. Native functions are objects of one QuickJS class whose
 //! call hook builds SpiderMonkey's `vp` array and calls the `JSNative`.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::ffi::{c_int, c_void};
 use std::ptr;
@@ -27,7 +28,7 @@ pub(crate) struct ObjectData {
     /// Held (`hold_realm`) and marked.
     pub realm: *mut RealmData,
     /// Reserved slots; reference-counted values.
-    pub slots: Box<[q::JSValue]>,
+    pub slots: Box<[Cell<q::JSValue>]>,
 }
 
 impl ObjectData {
@@ -36,7 +37,7 @@ impl ObjectData {
         Box::new(ObjectData {
             clasp,
             realm: unsafe { super::hold_realm(realm) },
-            slots: vec![q::JS_UNDEFINED; count].into_boxed_slice(),
+            slots: vec![Cell::new(q::JS_UNDEFINED); count].into_boxed_slice(),
         })
     }
 
@@ -48,7 +49,7 @@ impl ObjectData {
 
     pub unsafe fn free(self: Box<Self>, rt: *mut q::JSRuntime) {
         for v in self.slots.iter() {
-            q::JS_FreeValueRT(rt, *v);
+            q::JS_FreeValueRT(rt, v.get());
         }
         super::release_realm(self.realm);
     }
@@ -134,14 +135,14 @@ fn clasp_of_id(id: q::JSClassID) -> *const root::JSClass {
 
 /// The object data of `obj`, if it is an object of a SpiderMonkey class (globals included).
 #[inline]
-pub(crate) unsafe fn object_data<'a>(obj: *mut root::JSObject) -> Option<&'a mut ObjectData> {
+pub(crate) unsafe fn object_data<'a>(obj: *mut root::JSObject) -> Option<&'a ObjectData> {
     let v = obj_val(obj);
     let id = q::JS_GetClassID(v);
     if clasp_of_id(id).is_null() {
         return None;
     }
-    let data = q::JS_GetOpaque(v, id) as *mut ObjectData;
-    data.as_mut()
+    let data = q::JS_GetOpaque(v, id) as *const ObjectData;
+    data.as_ref()
 }
 
 /// Placeholder class reported for objects QuickJS created itself (plain objects, arrays, ...).
@@ -243,8 +244,8 @@ unsafe extern "C" fn gc_mark(rt: *mut q::JSRuntime, val: q::JSValue, mark: q::JS
         return;
     }
     for v in (*data).slots.iter() {
-        if v.has_ref_count() {
-            q::JS_MarkValue(rt, *v, mark);
+        if v.get().has_ref_count() {
+            q::JS_MarkValue(rt, v.get(), mark);
         }
     }
     super::mark_realm(rt, (*data).realm, mark);
@@ -370,7 +371,7 @@ pub(crate) struct FunctionData {
     pub info: *const root::JSJitInfo,
     /// Held (`hold_realm`) and marked.
     pub realm: *mut RealmData,
-    pub slots: [q::JSValue; 2],
+    pub slots: [Cell<q::JSValue>; 2],
 }
 
 unsafe fn function_class(rt: *mut q::JSRuntime) -> q::JSClassID {
@@ -398,14 +399,14 @@ unsafe fn function_class(rt: *mut q::JSRuntime) -> q::JSClassID {
     id
 }
 
-pub(crate) unsafe fn function_data<'a>(obj: *mut root::JSObject) -> Option<&'a mut FunctionData> {
+pub(crate) unsafe fn function_data<'a>(obj: *mut root::JSObject) -> Option<&'a FunctionData> {
     let v = obj_val(obj);
     let id = q::JS_GetClassID(v);
     let fid = FUNCTION_CLASS_ID.load(Ordering::Relaxed);
     if fid == 0 || id != fid {
         return None;
     }
-    (q::JS_GetOpaque(v, id) as *mut FunctionData).as_mut()
+    (q::JS_GetOpaque(v, id) as *const FunctionData).as_ref()
 }
 
 unsafe extern "C" fn function_finalize(rt: *mut q::JSRuntime, val: q::JSValue) {
@@ -413,7 +414,7 @@ unsafe extern "C" fn function_finalize(rt: *mut q::JSRuntime, val: q::JSValue) {
     if !data.is_null() {
         let data = Box::from_raw(data);
         for v in data.slots.iter() {
-            q::JS_FreeValueRT(rt, *v);
+            q::JS_FreeValueRT(rt, v.get());
         }
         super::release_realm(data.realm);
     }
@@ -427,8 +428,8 @@ unsafe extern "C" fn function_gc_mark(
     let data = q::JS_GetOpaque(val, q::JS_GetClassID(val)) as *mut FunctionData;
     if !data.is_null() {
         for v in (*data).slots.iter() {
-            if v.has_ref_count() {
-                q::JS_MarkValue(rt, *v, mark);
+            if v.get().has_ref_count() {
+                q::JS_MarkValue(rt, v.get(), mark);
             }
         }
         super::mark_realm(rt, (*data).realm, mark);
@@ -477,7 +478,7 @@ pub(crate) unsafe fn new_function(
         native,
         info,
         realm: super::hold_realm(cx.current_realm()),
-        slots: [q::JS_UNDEFINED; 2],
+        slots: [const { Cell::new(q::JS_UNDEFINED) }; 2],
     });
     q::JS_SetOpaque(f, Box::into_raw(data) as *mut c_void);
     let flags = q::JS_PROP_CONFIGURABLE as c_int;
@@ -578,7 +579,7 @@ pub(crate) unsafe fn JS_GetReservedSlot(
         (index as usize) < data.embedder_slot_count(),
         "reserved slot {index} out of range"
     );
-    *dest = JSVal::from_qjs(data.slots[index as usize]);
+    *dest = JSVal::from_qjs(data.slots[index as usize].get());
 }
 
 pub(crate) unsafe fn JS_SetReservedSlot(
@@ -593,7 +594,7 @@ pub(crate) unsafe fn JS_SetReservedSlot(
         "reserved slot {index} out of range"
     );
     let new = q::JS_DupValueRT(cx.rt, (*v).to_qjs());
-    let old = std::mem::replace(&mut data.slots[index as usize], new);
+    let old = data.slots[index as usize].replace(new);
     q::JS_FreeValueRT(cx.rt, old);
 }
 
