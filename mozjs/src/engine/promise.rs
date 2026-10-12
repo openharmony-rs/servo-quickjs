@@ -709,6 +709,9 @@ pub(crate) unsafe fn RunJSMicroTask(
         return false;
     };
     let mut args = data.args.take();
+    // Every QuickJS job takes 2 to 5 arguments, so none means the microtask ran already. The API
+    // runs each dequeued microtask once; a second run would call the job without its arguments.
+    debug_assert!(!args.is_empty(), "microtask already ran");
     let ctx = if data.realm.is_null() {
         cx.base_ctx
     } else {
