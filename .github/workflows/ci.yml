@@ -35,6 +35,8 @@ jobs:
         run: pkg-config --exists icu-i18n || (sudo apt-get update && sudo apt-get install -y libicu-dev)
       - name: Bindings match quickjs.h
         run: just check-bindings
+      - name: Clippy lints the source denies
+        run: just lint
       - name: Tests
         run: just test
       - name: Tests with the tracing verifier

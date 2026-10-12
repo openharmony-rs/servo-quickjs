@@ -18,6 +18,14 @@ Design: `docs/design.md`. Read it first.
 ## Rules
 
 - **Context and realm.** `Cx::from_raw(cx)` gives the runtime state; `cx.qctx()` is the QuickJS context of the current realm. Functions without a `cx` parameter use `super::current()`.
+- **Re-entrancy.** Any call into QuickJS or the embedder can run natives, hooks and finalizers that reach the same runtime state (`current()`) and object data (`JS_GetOpaque`) again. Allocating a QuickJS object counts too: it can start a GC, whose `gc_mark` hooks read object data. If that code touches data behind a `&mut` that is used after the call, or that is an argument of the function making it, the behaviour is undefined, and the compiler optimizes on it.
+  - `Cx` is only borrowed shared (`&Cx`), and only pointed to by `*const Cx`. State that changes goes in a cell: a `Cell`, or a `Stack`/`Queue` from `engine/reentrant.rs`, which hand out copies only. Never add a method that returns a reference into one.
+  - For object data, copy out what you need and end the `&mut` borrow before the call. Free replaced values after the borrow ends, not while it is live. New accessors return `&T`, with cells for the fields that change. Such a reference is only valid while the object is alive, so keep the object retained (rooted, pooled or counted) while you use it.
+  - What is checked:
+    - `src/engine` denies clippy's `mut_from_ref` (`just lint`, in CI). It rejects a `&mut` returned from a shared reference, such as a `&mut` into a cell or an accessor taking `cx: &Cx`.
+    - `tests/qjs_aliasing_rules.rs` rejects `&mut Cx` in a type, a `&mut self` method of `Cx`, and a `*mut Cx` or `NonNull<Cx>` outside `JS_DestroyContext`.
+    - The same test lists the functions that hand out a `&mut` from a raw pointer with a lifetime no argument bounds: object data accessors, and the structured-clone writer and reader.
+    - None of these sees whether a `&mut` stays in use across a call into QuickJS. Neither the compiler nor Miri (which can't run the C code) checks that; review does.
 - **Values** (`JSVal`) are QuickJS `JSValue`s (`.to_qjs()`, `JSVal::from_qjs()`). `*mut JSObject`, `*mut JSString` and `*mut JS::Symbol` are the QuickJS pointers. Use `obj_val(obj)` / `val_obj(v)`.
 - **Ownership.**
   - Anything returned to Rust or written to an out-parameter must stay alive for the rest of the task:

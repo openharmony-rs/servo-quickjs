@@ -33,6 +33,10 @@ test-asan *args:
 check-bindings: gen-bindings
     git diff --exit-code servo-quickjs/src/bindings.rs
 
+# Run the clippy lints the source denies, e.g. `mut_from_ref` in `src/engine` (HACKING.md, "Re-entrancy").
+lint:
+    CARGO_TARGET_DIR={{target}} cargo clippy -p mozjs -- -A clippy::all
+
 # Build Servo's servoshell (in `SERVO_DIR`) against the shim.
 servo cmd="build":
     cd {{servo}} && LIBCLANG_PATH={{libclang}} CARGO_TARGET_DIR={{servo_target}} cargo {{cmd}} -p servoshell --config '{{patch}}'

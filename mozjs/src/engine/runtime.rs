@@ -61,7 +61,7 @@ pub(crate) unsafe fn JS_DestroyContext(raw: *mut root::JSContext) {
     // Frees every object and realm (realms with their contexts, patch Q15).
     q::JS_FreeRuntime(cx.rt);
     super::realm::forget_leaked_realms();
-    set_current(ptr::null_mut());
+    set_current(ptr::null());
     // After the finalizers that `JS_FreeRuntime` runs, which still release values into the pool.
     #[cfg(qjs_pool_stats)]
     super::pool_stats::report();

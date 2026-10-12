@@ -9,6 +9,8 @@
 //! (`tools/sig.py NAME` prints them). Design: `docs/design.md`.
 
 #![allow(non_snake_case)]
+// A `&mut` handed out from a shared reference (`&Cx`) aliases: see HACKING.md, "Re-entrancy".
+#![deny(clippy::mut_from_ref)]
 
 use std::cell::Cell;
 use std::ffi::CString;
@@ -95,7 +97,7 @@ pub(crate) struct RealmData {
     pub window_proxy: *mut root::JSObject,
 }
 
-thread_local!(static CURRENT: Cell<*mut Cx> = const { Cell::new(ptr::null_mut()) });
+thread_local!(static CURRENT: Cell<*const Cx> = const { Cell::new(ptr::null()) });
 
 impl Cx {
     pub fn from_raw<'a>(cx: *mut root::JSContext) -> &'a Cx {
@@ -227,7 +229,7 @@ pub(crate) fn try_current<'a>() -> Option<&'a Cx> {
     }
 }
 
-pub(crate) fn set_current(cx: *mut Cx) {
+pub(crate) fn set_current(cx: *const Cx) {
     CURRENT.with(|c| c.set(cx));
 }
 
