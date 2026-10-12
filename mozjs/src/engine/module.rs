@@ -18,7 +18,7 @@
 //! The referrer of a request is a `JSScript`: the code of the module (patch Q31) or of the
 //! script calling import().
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::marker::PhantomData;
@@ -46,14 +46,14 @@ struct ModuleData {
     module: *mut q::JSModuleDef,
     kind: ModuleKind,
     /// The `SetModulePrivate` value of synthetic modules (counted).
-    private: q::JSValue,
+    private: Cell<q::JSValue>,
     /// [[LoadedModules]]: the module record each request resolved to (counted), by index.
-    loaded: Vec<q::JSValue>,
+    loaded: Box<[Cell<q::JSValue>]>,
     /// The request objects of the module's requests (counted), by index, made on first use so
     /// that the load hook sees the same request each time.
-    requests: Vec<q::JSValue>,
+    requests: Box<[Cell<q::JSValue>]>,
     /// [[Status]] is no longer "new": a graph load that visited the module completed.
-    loaded_graph: bool,
+    loaded_graph: Cell<bool>,
 }
 
 /// Opaque data of `ModuleRequest` objects.
@@ -73,12 +73,12 @@ struct LoadState {
     promise: q::JSValue,
     resolved: root::JS::LoadModuleResolvedCallback,
     rejected: root::JS::LoadModuleRejectedCallback,
-    is_loading: bool,
-    pending: usize,
-    /// Counted module records.
-    visited: Vec<q::JSValue>,
+    is_loading: Cell<bool>,
+    pending: Cell<usize>,
+    /// Counted module records. Only borrowed to add or read entries, never across a call.
+    visited: RefCell<Vec<q::JSValue>>,
     /// The records in `visited`.
-    visited_set: HashSet<*mut root::JSObject>,
+    visited_set: RefCell<HashSet<*mut root::JSObject>>,
     /// Counted.
     host_defined: q::JSValue,
 }
@@ -154,61 +154,64 @@ fn module_val(m: *mut q::JSModuleDef) -> q::JSValue {
     q::JSValue::mkptr(q::JS_TAG_MODULE, m as *mut c_void)
 }
 
-unsafe fn opaque_of<T>(v: q::JSValue, class: fn(ClassIds) -> q::JSClassID) -> *mut T {
+/// The data of `v` if it is of `class`; only finalizers make it mutable, to free it.
+unsafe fn opaque_of<T>(v: q::JSValue, class: fn(ClassIds) -> q::JSClassID) -> *const T {
     match CLASSES.get() {
-        Some(ids) => q::JS_GetOpaque(v, class(*ids)) as *mut T,
-        None => ptr::null_mut(),
+        Some(ids) => q::JS_GetOpaque(v, class(*ids)) as *const T,
+        None => ptr::null(),
     }
 }
 
-unsafe fn module_data<'a>(obj: *mut root::JSObject) -> Option<&'a mut ModuleData> {
-    opaque_of::<ModuleData>(obj_val(obj), |ids| ids.module).as_mut()
+unsafe fn module_data<'a>(obj: *mut root::JSObject) -> Option<&'a ModuleData> {
+    opaque_of::<ModuleData>(obj_val(obj), |ids| ids.module).as_ref()
 }
 
-unsafe fn request_data<'a>(obj: *mut root::JSObject) -> Option<&'a mut RequestData> {
-    opaque_of::<RequestData>(obj_val(obj), |ids| ids.request).as_mut()
+unsafe fn request_data<'a>(obj: *mut root::JSObject) -> Option<&'a RequestData> {
+    opaque_of::<RequestData>(obj_val(obj), |ids| ids.request).as_ref()
 }
 
-unsafe fn state_data(v: q::JSValue) -> *mut LoadState {
+/// The state of a graph load, if `v` is a `GraphLoadingState` object.
+unsafe fn state_of<'a>(v: q::JSValue) -> Option<&'a LoadState> {
     if v.tag() != q::JS_TAG_OBJECT {
-        return ptr::null_mut();
+        return None;
     }
-    opaque_of::<LoadState>(v, |ids| ids.state)
+    opaque_of::<LoadState>(v, |ids| ids.state).as_ref()
 }
 
-unsafe fn module_of(obj: *mut root::JSObject) -> &'static mut ModuleData {
+unsafe fn module_of<'a>(obj: *mut root::JSObject) -> &'a ModuleData {
     module_data(obj).expect("not a module record")
 }
 
-unsafe fn mark_all<'a>(
+unsafe fn mark_all(
     rt: *mut q::JSRuntime,
-    values: impl IntoIterator<Item = &'a q::JSValue>,
+    values: impl IntoIterator<Item = q::JSValue>,
     mark: q::JS_MarkFunc,
 ) {
     for v in values {
         if v.has_ref_count() {
-            q::JS_MarkValue(rt, *v, mark);
+            q::JS_MarkValue(rt, v, mark);
         }
     }
 }
 
-unsafe fn free_all<'a>(rt: *mut q::JSRuntime, values: impl IntoIterator<Item = &'a q::JSValue>) {
+unsafe fn free_all(rt: *mut q::JSRuntime, values: impl IntoIterator<Item = q::JSValue>) {
     for v in values {
-        q::JS_FreeValueRT(rt, *v);
+        q::JS_FreeValueRT(rt, v);
     }
 }
 
 unsafe extern "C" fn module_finalize(rt: *mut q::JSRuntime, val: q::JSValue) {
     let data = opaque_of::<ModuleData>(val, |ids| ids.module);
     if !data.is_null() {
-        let data = Box::from_raw(data);
+        let data = Box::from_raw(data as *mut ModuleData);
         RECORDS.with(|r| r.borrow_mut().remove(&(data.module as usize)));
         q::JS_FreeValueRT(rt, module_val(data.module));
-        if data.private.tag() != q::JS_TAG_UNDEFINED {
-            release_script_private(rt, data.private);
+        let private = data.private.get();
+        if private.tag() != q::JS_TAG_UNDEFINED {
+            release_script_private(rt, private);
         }
-        q::JS_FreeValueRT(rt, data.private);
-        free_all(rt, data.loaded.iter().chain(&data.requests));
+        q::JS_FreeValueRT(rt, private);
+        free_all(rt, data.loaded.iter().chain(&*data.requests).map(Cell::get));
     }
 }
 
@@ -216,40 +219,41 @@ unsafe extern "C" fn module_gc_mark(rt: *mut q::JSRuntime, val: q::JSValue, mark
     let data = opaque_of::<ModuleData>(val, |ids| ids.module);
     if let Some(data) = data.as_ref() {
         q::JS_MarkValue(rt, module_val(data.module), mark);
-        mark_all(rt, [&data.private], mark);
-        mark_all(rt, data.loaded.iter().chain(&data.requests), mark);
+        mark_all(rt, [data.private.get()], mark);
+        let records = data.loaded.iter().chain(&*data.requests);
+        mark_all(rt, records.map(Cell::get), mark);
     }
 }
 
 unsafe extern "C" fn request_finalize(rt: *mut q::JSRuntime, val: q::JSValue) {
     let data = opaque_of::<RequestData>(val, |ids| ids.request);
     if !data.is_null() {
-        let data = Box::from_raw(data);
-        free_all(rt, [&data.specifier, &data.referrer]);
+        let data = Box::from_raw(data as *mut RequestData);
+        free_all(rt, [data.specifier, data.referrer]);
     }
 }
 
 unsafe extern "C" fn request_gc_mark(rt: *mut q::JSRuntime, val: q::JSValue, mark: q::JS_MarkFunc) {
     let data = opaque_of::<RequestData>(val, |ids| ids.request);
     if let Some(data) = data.as_ref() {
-        mark_all(rt, [&data.referrer], mark);
+        mark_all(rt, [data.referrer], mark);
     }
 }
 
 unsafe extern "C" fn state_finalize(rt: *mut q::JSRuntime, val: q::JSValue) {
     let data = opaque_of::<LoadState>(val, |ids| ids.state);
     if !data.is_null() {
-        let data = Box::from_raw(data);
-        free_all(rt, [&data.promise, &data.host_defined]);
-        free_all(rt, &data.visited);
+        let data = Box::from_raw(data as *mut LoadState);
+        free_all(rt, [data.promise, data.host_defined]);
+        free_all(rt, data.visited.take());
     }
 }
 
 unsafe extern "C" fn state_gc_mark(rt: *mut q::JSRuntime, val: q::JSValue, mark: q::JS_MarkFunc) {
     let data = opaque_of::<LoadState>(val, |ids| ids.state);
     if let Some(data) = data.as_ref() {
-        mark_all(rt, [&data.promise, &data.host_defined], mark);
-        mark_all(rt, &data.visited, mark);
+        mark_all(rt, [data.promise, data.host_defined], mark);
+        mark_all(rt, data.visited.borrow().iter().copied(), mark);
     }
 }
 
@@ -270,10 +274,10 @@ unsafe fn new_module_object(cx: &Cx, module: q::JSValue, kind: ModuleKind) -> *m
     let data = Box::into_raw(Box::new(ModuleData {
         module: m,
         kind,
-        private: q::JS_UNDEFINED,
-        loaded: vec![q::JS_UNDEFINED; count],
-        requests: vec![q::JS_UNDEFINED; count],
-        loaded_graph: false,
+        private: Cell::new(q::JS_UNDEFINED),
+        loaded: vec![Cell::new(q::JS_UNDEFINED); count].into_boxed_slice(),
+        requests: vec![Cell::new(q::JS_UNDEFINED); count].into_boxed_slice(),
+        loaded_graph: Cell::new(false),
     }));
     RECORDS.with(|r| r.borrow_mut().insert(m as usize, val_obj(obj)));
     q::JS_SetOpaque(obj, data as *mut c_void);
@@ -412,8 +416,9 @@ unsafe fn module_type_of(ctx: *mut q::JSContext, attributes: q::JSValue) -> root
 /// with an exception.
 unsafe fn module_request(cx: &Cx, module: *mut root::JSObject, idx: usize) -> *mut root::JSObject {
     let data = module_of(module);
-    if data.requests[idx].tag() == q::JS_TAG_OBJECT {
-        return val_obj(data.requests[idx]);
+    let request = data.requests[idx].get();
+    if request.tag() == q::JS_TAG_OBJECT {
+        return val_obj(request);
     }
     let ctx = cx.qctx();
     let m = data.module;
@@ -435,7 +440,7 @@ unsafe fn module_request(cx: &Cx, module: *mut root::JSObject, idx: usize) -> *m
     if request.tag() == q::JS_TAG_EXCEPTION {
         return ptr::null_mut();
     }
-    module_of(module).requests[idx] = request;
+    data.requests[idx].set(request);
     val_obj(request)
 }
 
@@ -567,7 +572,7 @@ pub(crate) unsafe fn SetModulePrivate(module: *mut root::JSObject, value: *const
             q::JS_SetModulePrivateValue(cx.base_ctx, data.module, q::JS_DupValueRT(cx.rt, value));
         }
         ModuleKind::Synthetic => {
-            let old = std::mem::replace(&mut data.private, q::JS_DupValueRT(cx.rt, value));
+            let old = data.private.replace(q::JS_DupValueRT(cx.rt, value));
             if old.tag() != q::JS_TAG_UNDEFINED {
                 release_script_private(cx.rt, old);
             }
@@ -591,7 +596,7 @@ pub(crate) unsafe fn JS_GetModulePrivate(
     let data = module_of(module);
     let value = match data.kind {
         ModuleKind::JavaScript => q::JS_GetModulePrivateValue(cx.base_ctx, data.module),
-        ModuleKind::Synthetic => q::JS_DupValueRT(cx.rt, data.private),
+        ModuleKind::Synthetic => q::JS_DupValueRT(cx.rt, data.private.get()),
     };
     *dest.ptr = cx.adopt(value);
 }
@@ -673,10 +678,10 @@ unsafe fn new_load_state(
         promise,
         resolved,
         rejected,
-        is_loading: true,
-        pending: 1,
-        visited: Vec::new(),
-        visited_set: HashSet::new(),
+        is_loading: Cell::new(true),
+        pending: Cell::new(1),
+        visited: Default::default(),
+        visited_set: Default::default(),
         host_defined: q::JS_DupValueRT(cx.rt, (*host_defined.ptr).to_qjs()),
     });
     q::JS_SetOpaque(obj, Box::into_raw(data) as *mut c_void);
@@ -685,7 +690,7 @@ unsafe fn new_load_state(
 
 /// Settles the load of `state` (borrowed).
 unsafe fn settle_load(cx: &Cx, state: q::JSValue, error: Option<q::JSValue>) -> bool {
-    let data = &*state_data(state);
+    let data = state_of(state).expect("not a graph loading state");
     if data.promise.tag() == q::JS_TAG_OBJECT {
         let value = error.unwrap_or(q::JS_UNDEFINED);
         return q::JS_SettlePromise(cx.qctx(), data.promise, value, error.is_some() as c_int) >= 0;
@@ -749,23 +754,25 @@ unsafe fn inner_module_loading(cx: &Cx, state: q::JSValue, module: *mut root::JS
     if q::JS_CheckStackOverflow(cx.qctx()) != 0 {
         return fail_with_pending_exception(cx, state);
     }
+    // The load hook may finish loads before it returns (FinishLoadingImportedModule): that fills
+    // `data.loaded` and continues this load, which changes `load`'s flags, pending count and
+    // visited records, and may set `loaded_graph`. All of them are cells, read only through them.
+    let load = state_of(state).expect("not a graph loading state");
     let data = module_of(module);
-    let visited = (*state_data(state)).visited_set.contains(&module);
-    if data.kind == ModuleKind::JavaScript && !data.loaded_graph && !visited {
-        (*state_data(state)).visited_set.insert(module);
-        (*state_data(state))
-            .visited
-            .push(q::JS_DupValueRT(cx.rt, obj_val(module)));
+    let visited = load.visited_set.borrow().contains(&module);
+    if data.kind == ModuleKind::JavaScript && !data.loaded_graph.get() && !visited {
+        load.visited_set.borrow_mut().insert(module);
+        let record = q::JS_DupValueRT(cx.rt, obj_val(module));
+        load.visited.borrow_mut().push(record);
         let count = data.requests.len();
-        (*state_data(state)).pending += count;
+        load.pending.set(load.pending.get() + count);
         let referrer = GetModuleScript(handle(&module));
         for idx in 0..count {
             let qctx = cx.qctx();
-            let m = module_of(module).module;
-            let attributes = q::JS_GetModuleRequestAttributes(qctx, m, idx as c_int);
+            let attributes = q::JS_GetModuleRequestAttributes(qctx, data.module, idx as c_int);
             let supported = check_attributes(qctx, attributes, false);
             q::JS_FreeValue(qctx, attributes);
-            let loaded = module_of(module).loaded[idx];
+            let loaded = data.loaded[idx].get();
             let ok = if !supported {
                 fail_with_pending_exception(cx, state)
             } else if loaded.tag() == q::JS_TAG_OBJECT {
@@ -775,7 +782,7 @@ unsafe fn inner_module_loading(cx: &Cx, state: q::JSValue, module: *mut root::JS
                 if request.is_null() {
                     fail_with_pending_exception(cx, state)
                 } else {
-                    let host_defined = JSVal::from_qjs((*state_data(state)).host_defined);
+                    let host_defined = JSVal::from_qjs(load.host_defined);
                     host_load_imported_module(
                         cx,
                         referrer,
@@ -788,18 +795,17 @@ unsafe fn inner_module_loading(cx: &Cx, state: q::JSValue, module: *mut root::JS
             if !ok {
                 return false;
             }
-            if !(*state_data(state)).is_loading {
+            if !load.is_loading.get() {
                 return true;
             }
         }
     }
-    let data = &mut *state_data(state);
-    debug_assert!(data.pending >= 1);
-    data.pending -= 1;
-    if data.pending == 0 {
-        data.is_loading = false;
-        for v in &data.visited {
-            module_of(val_obj(*v)).loaded_graph = true;
+    debug_assert!(load.pending.get() >= 1);
+    load.pending.set(load.pending.get() - 1);
+    if load.pending.get() == 0 {
+        load.is_loading.set(false);
+        for v in load.visited.borrow().iter() {
+            module_of(val_obj(*v)).loaded_graph.set(true);
         }
         return settle_load(cx, state, None);
     }
@@ -814,13 +820,14 @@ unsafe fn continue_module_loading(
     module: *mut root::JSObject,
     error: Option<q::JSValue>,
 ) -> bool {
-    if !(*state_data(state)).is_loading {
+    let load = state_of(state).expect("not a graph loading state");
+    if !load.is_loading.get() {
         return true;
     }
     if !module.is_null() {
         return inner_module_loading(cx, state, module);
     }
-    (*state_data(state)).is_loading = false;
+    load.is_loading.set(false);
     settle_load(cx, state, Some(error.unwrap_or(q::JS_UNDEFINED)))
 }
 
@@ -830,12 +837,13 @@ unsafe fn load_requested_modules(cx: &Cx, module: *mut root::JSObject, state: q:
         return false;
     }
     let state = cx.adopt(state).to_qjs();
+    let load = state_of(state).expect("not a graph loading state");
     if module_of(module).kind != ModuleKind::JavaScript {
-        (*state_data(state)).is_loading = false;
+        load.is_loading.set(false);
         return settle_load(cx, state, None);
     }
     if !inner_module_loading(cx, state, module) {
-        (*state_data(state)).is_loading = false;
+        load.is_loading.set(false);
         return false;
     }
     true
@@ -862,7 +870,7 @@ pub(crate) unsafe fn LoadRequestedModules1(
     let cx = Cx::from_raw(cx);
     let mut funcs = [q::JS_UNDEFINED; 2];
     let promise = q::JS_NewPromiseCapability(cx.qctx(), funcs.as_mut_ptr());
-    free_all(cx.rt, &funcs);
+    free_all(cx.rt, funcs);
     if promise.tag() == q::JS_TAG_EXCEPTION {
         return false;
     }
@@ -877,12 +885,12 @@ unsafe fn record_loaded_module(cx: &Cx, request: *mut root::JSObject, result: *m
     if request.referrer.tag() != q::JS_TAG_OBJECT {
         return;
     }
-    let loaded = &mut module_of(val_obj(request.referrer)).loaded[request.index];
-    if loaded.tag() == q::JS_TAG_OBJECT {
-        debug_assert!(val_obj(*loaded) == result);
+    let loaded = &module_of(val_obj(request.referrer)).loaded[request.index];
+    if loaded.get().tag() == q::JS_TAG_OBJECT {
+        debug_assert!(val_obj(loaded.get()) == result);
         return;
     }
-    *loaded = q::JS_DupValueRT(cx.rt, obj_val(result));
+    loaded.set(q::JS_DupValueRT(cx.rt, obj_val(result)));
 }
 
 pub(crate) unsafe fn FinishLoadingImportedModule(
@@ -897,7 +905,7 @@ pub(crate) unsafe fn FinishLoadingImportedModule(
     let cx = Cx::from_raw(cx);
     record_loaded_module(cx, *moduleRequest.ptr, *result.ptr);
     let payload = (*payload.ptr).to_qjs();
-    if state_data(payload).is_null() {
+    if state_of(payload).is_none() {
         // ContinueDynamicImport: Servo uses FinishLoadingDynamicImportedModule instead.
         q::JS_ThrowInternalError(
             cx.qctx(),
@@ -928,7 +936,7 @@ pub(crate) unsafe fn FinishLoadingImportedModuleFailed(
     let cx = Cx::from_raw(cx);
     let payload = (*payloadArg.ptr).to_qjs();
     let error = (*error.ptr).to_qjs();
-    if !state_data(payload).is_null() {
+    if state_of(payload).is_some() {
         return continue_module_loading(cx, payload, ptr::null_mut(), Some(error));
     }
     // ContinueDynamicImport: rejects the promise of import().
@@ -957,7 +965,7 @@ unsafe extern "C" fn resolve_imported_module(
 ) -> *mut q::JSModuleDef {
     let _ = opaque;
     let loaded =
-        record_of(m).and_then(|record| module_of(record).loaded.get(idx as usize).copied());
+        record_of(m).and_then(|record| module_of(record).loaded.get(idx as usize).map(Cell::get));
     match loaded {
         Some(loaded) if loaded.tag() == q::JS_TAG_OBJECT => module_of(val_obj(loaded)).module,
         _ => {

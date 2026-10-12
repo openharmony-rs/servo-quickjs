@@ -17,9 +17,6 @@ const MUT_ACCESSORS: &[(&str, &str)] = &[
     ("clone.rs", "data_vec"),
     ("clone.rs", "reader"),
     ("clone.rs", "writer"),
-    ("module.rs", "module_data"),
-    ("module.rs", "module_of"),
-    ("module.rs", "request_data"),
 ];
 
 /// The engine sources, as (path in `src/engine`, lines without `//` comments).
