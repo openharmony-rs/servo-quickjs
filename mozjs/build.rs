@@ -41,20 +41,25 @@ fn icu() {
     match std::env::var("CARGO_CFG_TARGET_ENV").unwrap().as_str() {
         "ohos" if intl => println!("cargo:rustc-cfg=qjs_intl"),
         "gnu" if intl => {
-            let icu = pkg_config::Config::new()
-                .atleast_version("65")
-                .probe("icu-i18n")
-                .unwrap_or_else(|e| {
-                    let hint = if matches!(e, pkg_config::Error::CrossCompilation) {
-                        "point PKG_CONFIG_SYSROOT_DIR at the target's sysroot"
-                    } else {
-                        "install libicu-dev (or libicu-devel)"
-                    };
-                    panic!(
-                        "the `intl` feature needs ICU 65 or later: {hint}, or build without the \
-                         feature: {e}"
-                    )
-                });
+            let probe = |name| {
+                pkg_config::Config::new()
+                    .atleast_version("65")
+                    .probe(name)
+                    .unwrap_or_else(|e| {
+                        let hint = if matches!(e, pkg_config::Error::CrossCompilation) {
+                            "point PKG_CONFIG_SYSROOT_DIR at the target's sysroot"
+                        } else {
+                            "install libicu-dev (or libicu-devel)"
+                        };
+                        panic!(
+                            "the `intl` feature needs ICU 65 or later: {hint}, or build without \
+                             the feature: {e}"
+                        )
+                    })
+            };
+            let icu = probe("icu-i18n");
+            // Since ICU 76, a shared ICU's icu-i18n lists icu-uc only in `Requires.private`.
+            probe("icu-uc");
             if let Ok(dir) = pkg_config::get_variable("icu-i18n", "pcfiledir") {
                 println!("cargo:rerun-if-changed={dir}/icu-i18n.pc");
             }
