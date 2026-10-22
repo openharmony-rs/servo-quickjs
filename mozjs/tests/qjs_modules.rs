@@ -1040,3 +1040,55 @@ fn script_privates() {
     SCRIPT_PRIVATE_REFS
         .with(|r| assert_eq!(*r.borrow(), HashMap::from([(5, 0), (6, 0), (1, 0), (2, 0)])));
 }
+
+/// The global of a referrer is that of the realm its code was compiled in, not the current one
+/// (Q35): Servo's HostLoadImportedModule takes the settings object from it.
+#[test]
+fn global_from_script() {
+    with_realm(|cx| unsafe {
+        let global_a = jsapi::CurrentGlobalOrNull(cx.raw_cx());
+        let options = CompileOptionsWrapper::new(cx, CString::new(url("classic-a.js")).unwrap(), 1);
+        let script = mozjs::rust::wrappers2::Compile1(
+            cx,
+            options.ptr,
+            &mut transform_str_to_source_text("1"),
+        );
+        rooted!(&in(cx) let script_a: *mut JSScript = script);
+        let module = compile(
+            cx,
+            &url("module-a.js"),
+            "export const a = 1;",
+            ModuleType::JavaScript,
+        );
+        rooted!(&in(cx) let module_script_a: *mut JSScript = jsapi::GetModuleScript(h(&module)));
+        assert!(!module_script_a.get().is_null());
+
+        let options = RealmOptions::default();
+        rooted!(&in(cx) let global_b = JS_NewGlobalObject(
+            cx,
+            &SIMPLE_GLOBAL_CLASS,
+            ptr::null_mut(),
+            OnNewGlobalHookOption::FireOnNewGlobalHook,
+            &*options,
+        ));
+        let mut realm = mozjs::realm::AutoRealm::new_from_handle(cx, global_b.handle());
+        let cx = &mut *realm;
+        let options = CompileOptionsWrapper::new(cx, CString::new(url("classic-b.js")).unwrap(), 1);
+        let script = mozjs::rust::wrappers2::Compile1(
+            cx,
+            options.ptr,
+            &mut transform_str_to_source_text("2"),
+        );
+        rooted!(&in(cx) let script_b: *mut JSScript = script);
+
+        assert_eq!(jsapi::JS_GetGlobalFromScript(script_a.get()), global_a);
+        assert_eq!(
+            jsapi::JS_GetGlobalFromScript(module_script_a.get()),
+            global_a
+        );
+        assert_eq!(
+            jsapi::JS_GetGlobalFromScript(script_b.get()),
+            global_b.get()
+        );
+    });
+}

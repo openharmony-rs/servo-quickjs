@@ -1181,6 +1181,9 @@ JSValue JS_GetScriptPrivateValue(JSContext *ctx, JSValueConst script);
 JSValue JS_GetActiveScript(JSContext *ctx);
 JSValue JS_GetModuleScript(JSContext *ctx, JSModuleDef *m);
 JSModuleDef *JS_GetScriptModule(JSValueConst script);
+/* Servo: the realm whose global a script's code runs in (the realm it was
+   compiled in), or NULL if 'script' is not code. */
+JSContext *JS_GetScriptRealm(JSValueConst script);
 /* Servo: host hooks. The import.meta hook populates the new import.meta object of
    'm'. The dynamic import hook replaces the module loader for import(): 'm' is
    the module of the calling code, or NULL for script code, whose host-defined

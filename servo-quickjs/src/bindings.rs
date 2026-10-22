@@ -1924,6 +1924,9 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn JS_GetScriptModule(script: JSValue) -> *mut JSModuleDef;
 }
+unsafe extern "C" {
+    pub fn JS_GetScriptRealm(script: JSValue) -> *mut JSContext;
+}
 pub type JSImportMetaHook = ::std::option::Option<
     unsafe extern "C" fn(
         ctx: *mut JSContext,

@@ -360,3 +360,19 @@ pub(crate) unsafe fn JS_GetScriptPrivate(
     };
     *dest.ptr = cx.adopt(private);
 }
+
+/// The global of the realm a script's code was compiled in (patch Q35), which is the settings
+/// object of a module's or classic script's referrer.
+pub(crate) unsafe fn JS_GetGlobalFromScript(script: *mut root::JSScript) -> *mut root::JSObject {
+    let script = q::JSValue::mkptr(q::JS_TAG_FUNCTION_BYTECODE, script as *mut c_void);
+    let qctx = q::JS_GetScriptRealm(script);
+    if qctx.is_null() {
+        return ptr::null_mut();
+    }
+    let realm = super::realm::realm_of_qctx(qctx);
+    if realm.is_null() {
+        ptr::null_mut()
+    } else {
+        (*realm).global
+    }
+}

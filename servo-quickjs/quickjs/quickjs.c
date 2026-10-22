@@ -63158,6 +63158,14 @@ JSModuleDef *JS_GetScriptModule(JSValueConst script)
     return sm ? sm->module : NULL;
 }
 
+/* Servo: the realm of a script's code */
+JSContext *JS_GetScriptRealm(JSValueConst script)
+{
+    if (JS_VALUE_GET_TAG(script) != JS_TAG_FUNCTION_BYTECODE)
+        return NULL;
+    return ((JSFunctionBytecode *)JS_VALUE_GET_PTR(script))->realm;
+}
+
 /* Marks a settled promise as handled, telling the rejection tracker like
    adding a reaction would (without adding one). */
 void JS_MarkPromiseHandled(JSContext *ctx, JSValueConst promise)
