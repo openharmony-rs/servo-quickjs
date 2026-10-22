@@ -1034,6 +1034,7 @@ JS_BOOL JS_GetPromiseIsHandled(JSValueConst promise);
 void JS_SetPromiseIsHandled(JSValueConst promise, JS_BOOL is_handled);
 
 /* return != 0 if the JS code needs to be interrupted */
+/* Servo: a negative result makes the next poll call the handler again (Q36) */
 typedef int JSInterruptHandler(JSRuntime *rt, void *opaque);
 void JS_SetInterruptHandler(JSRuntime *rt, JSInterruptHandler *cb, void *opaque);
 /* Servo: host check before eval() and the Function constructors compile code

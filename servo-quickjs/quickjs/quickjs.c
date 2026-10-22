@@ -8068,7 +8068,11 @@ static no_inline __exception int __js_poll_interrupts(JSContext *ctx)
     JSRuntime *rt = ctx->rt;
     ctx->interrupt_counter = JS_INTERRUPT_COUNTER_INIT;
     if (rt->interrupt_handler) {
-        if (rt->interrupt_handler(rt, rt->interrupt_opaque)) {
+        int ret = rt->interrupt_handler(rt, rt->interrupt_opaque);
+        /* Servo: a negative result leaves the interrupt for the next poll (Q36) */
+        if (ret < 0) {
+            ctx->interrupt_counter = 1;
+        } else if (ret) {
             JS_ThrowInterrupted(ctx);
             return -1;
         }

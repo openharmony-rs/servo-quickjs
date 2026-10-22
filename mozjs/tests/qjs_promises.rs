@@ -537,6 +537,10 @@ unsafe extern "C" fn interrupt_callback(_: *mut RawJSContext) -> bool {
     KEEP_RUNNING.load(Ordering::SeqCst)
 }
 
+unsafe extern "C" fn do_nothing(_: *mut RawJSContext, _: u32, _: *mut Value) -> bool {
+    true
+}
+
 fn interrupts(thread_safe: ThreadSafeJSContext, cx: &mut JSContext, global: SafeHandleObject) {
     unsafe {
         assert!(jsapi::JS_AddInterruptCallback(
@@ -575,8 +579,132 @@ fn interrupts(thread_safe: ThreadSafeJSContext, cx: &mut JSContext, global: Safe
         requester.join().unwrap();
         assert!(!jsapi::JS_IsExceptionPending(cx.raw_cx()));
         assert_eq!(INTERRUPTS.load(Ordering::SeqCst), 3);
+
+        // As in SpiderMonkey, a pending interrupt is only handled in script: creating promises
+        // and adding reactions, which run only built-in and native functions here, succeeds and
+        // leaves it pending (Q36).
+        jsapi::JS_RequestInterruptCallback(cx.raw_cx());
+        let executor = jsapi::JS_GetFunctionObject(jsapi::JS_NewFunction(
+            cx.raw_cx(),
+            Some(do_nothing),
+            2,
+            0,
+            c"executor".as_ptr(),
+        ));
+        let none: *mut JSObject = ptr::null_mut();
+        let value = UndefinedValue();
+        for _ in 0..20_000 {
+            let p = new_promise(cx, executor);
+            assert!(!jsapi::CallOriginalPromiseResolve(cx.raw_cx(), handle(&value)).is_null());
+            assert!(!jsapi::CallOriginalPromiseReject(cx.raw_cx(), handle(&value)).is_null());
+            assert!(jsapi::AddPromiseReactions(
+                cx.raw_cx(),
+                handle(&p),
+                handle(&executor),
+                handle(&none)
+            ));
+        }
+        assert_eq!(INTERRUPTS.load(Ordering::SeqCst), 3);
+        assert!(eval(cx, global, "for (;;) {}").is_err());
+        assert_eq!(INTERRUPTS.load(Ordering::SeqCst), 4);
         KEEP_RUNNING.store(true, Ordering::SeqCst);
         assert_eq!(eval(cx, global, "1 + 1").unwrap().to_int32(), 2);
+    }
+}
+
+/// A native that creates a promise, as Servo's DOM methods do.
+unsafe extern "C" fn make_promise(cx: *mut RawJSContext, _: u32, _: *mut Value) -> bool {
+    let executor = jsapi::JS_GetFunctionObject(jsapi::JS_NewFunction(
+        cx,
+        Some(do_nothing),
+        2,
+        0,
+        c"executor".as_ptr(),
+    ));
+    !jsapi::NewPromiseObject(cx, handle(&executor)).is_null()
+}
+
+/// Where the promise operations leave a pending interrupt pending, it is still handled in script:
+/// script they run themselves, and the script that runs after them (Q36).
+fn deferred_interrupts(cx: &mut JSContext, global: SafeHandleObject) {
+    unsafe {
+        assert!(jsapi::JS_AddInterruptCallback(
+            cx.raw_cx(),
+            Some(interrupt_callback)
+        ));
+        KEEP_RUNNING.store(false, Ordering::SeqCst);
+        let count = || INTERRUPTS.load(Ordering::SeqCst);
+
+        // A `then` getter and an executor are script. QuickJS's resolving function then rejects the
+        // promise with the termination, where SpiderMonkey returns null, so the result isn't
+        // checked.
+        let thenable = eval(
+            cx,
+            global,
+            "({ get then() { for (let i = 0; i < 1e6; i++) {} } })",
+        )
+        .unwrap();
+        let before = count();
+        jsapi::JS_RequestInterruptCallback(cx.raw_cx());
+        jsapi::CallOriginalPromiseResolve(cx.raw_cx(), handle(&thenable));
+        assert_eq!(count(), before + 1, "the then getter was not interrupted");
+        let executor = eval(
+            cx,
+            global,
+            "(function () { for (let i = 0; i < 1e6; i++) {} })",
+        )
+        .unwrap()
+        .to_object();
+        jsapi::JS_RequestInterruptCallback(cx.raw_cx());
+        assert!(jsapi::NewPromiseObject(cx.raw_cx(), handle(&executor)).is_null());
+        assert_eq!(count(), before + 2, "the executor was not interrupted");
+
+        // Settling with a non-thenable runs no script.
+        let promises: Vec<_> = (0..20_000)
+            .map(|_| new_promise(cx, ptr::null_mut()))
+            .collect();
+        let value = UndefinedValue();
+        jsapi::JS_RequestInterruptCallback(cx.raw_cx());
+        for p in promises {
+            assert!(jsapi::ResolvePromise(
+                cx.raw_cx(),
+                handle(&p),
+                handle(&value)
+            ));
+        }
+        assert_eq!(count(), before + 2);
+        assert!(eval(cx, global, "for (;;) {}").is_err());
+        assert_eq!(count(), before + 3);
+
+        // A loop that creates promises polls both in and out of them. Whatever the phase of
+        // QuickJS's poll countdown, a deferred interrupt must not be deferred at every later poll.
+        assert!(!jsapi::JS_DefineFunction(
+            cx.raw_cx(),
+            global.into(),
+            c"makePromise".as_ptr(),
+            Some(make_promise),
+            0,
+            0
+        )
+        .is_null());
+        eval(cx, global, "function n() {}").unwrap();
+        for calls in 0..7 {
+            for offset in 0..10 {
+                let source = format!(
+                    "{} for (let i = 0; i < 5000; i++) {{ makePromise(); {} }}",
+                    "n(); ".repeat(offset),
+                    "n(); ".repeat(calls)
+                );
+                let before = count();
+                jsapi::JS_RequestInterruptCallback(cx.raw_cx());
+                assert!(
+                    eval(cx, global, &source).is_err(),
+                    "not interrupted: {source}"
+                );
+                assert_eq!(count(), before + 1);
+            }
+        }
+        KEEP_RUNNING.store(true, Ordering::SeqCst);
     }
 }
 
@@ -742,5 +870,6 @@ fn promises() {
     with_global(&engine, |_, cx, global| job_queue(cx, global));
     with_global(&engine, |_, cx, global| rejection_tracker(cx, global));
     with_global(&engine, interrupts);
+    with_global(&engine, |_, cx, global| deferred_interrupts(cx, global));
     with_global(&engine, |_, cx, global| csp(cx, global));
 }

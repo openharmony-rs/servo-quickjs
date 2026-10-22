@@ -200,13 +200,32 @@ pub(crate) unsafe fn GetScriptedCallerGlobal(cx: *mut root::JSContext) -> *mut r
     }
 }
 
-pub(crate) unsafe fn HideScriptedCaller(cx: *mut root::JSContext) {
-    let cx = Cx::from_raw(cx);
+/// The innermost stack frame, or 0 for none.
+pub(crate) unsafe fn innermost_frame(cx: &Cx) -> usize {
     let mut innermost = 0;
     visit_frames(cx, |info| {
         innermost = info.frame as usize;
         true
     });
+    innermost
+}
+
+/// Whether a scripted frame is newer than `mark`, a frame from `innermost_frame` that is still on
+/// the stack.
+pub(crate) unsafe fn script_since(cx: &Cx, mark: usize) -> bool {
+    let mut script = false;
+    visit_frames(cx, |info| {
+        if info.frame as usize == mark {
+            return true;
+        }
+        script = info.is_native == 0;
+        script
+    });
+    script
+}
+
+pub(crate) unsafe fn HideScriptedCaller(cx: *mut root::JSContext) {
+    let innermost = innermost_frame(Cx::from_raw(cx));
     HIDDEN_CALLERS.with(|h| h.borrow_mut().push(innermost));
 }
 

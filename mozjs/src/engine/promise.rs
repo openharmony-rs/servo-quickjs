@@ -31,6 +31,8 @@ pub(crate) struct RuntimeHooks {
     interrupt_callbacks: Stack<root::JSInterruptCallback>,
     /// Set by `JS_RequestInterruptCallback`, possibly from another thread.
     interrupt_requested: Arc<AtomicBool>,
+    /// While a promise operation defers interrupts: the innermost stack frame when it began.
+    interrupts_deferred_at: Cell<Option<usize>>,
     security_callbacks: Cell<*const root::JSSecurityCallbacks>,
 }
 
@@ -43,6 +45,7 @@ impl Default for RuntimeHooks {
             rejection_tracker_data: Cell::new(ptr::null_mut()),
             interrupt_callbacks: Default::default(),
             interrupt_requested: Default::default(),
+            interrupts_deferred_at: Cell::new(None),
             security_callbacks: Cell::new(ptr::null()),
         }
     }
@@ -89,7 +92,33 @@ unsafe fn promise_state(promise: *mut root::JSObject) -> Option<q::JSPromiseStat
     (state <= q::JS_PROMISE_REJECTED).then_some(state)
 }
 
+/// Runs `f`, a promise operation, with a pending interrupt left pending while only built-in and
+/// native functions run (Q36). QuickJS polls for interrupts on every call, of its own built-ins
+/// too, where SpiderMonkey checks only in script, so creating or settling a promise never fails
+/// there because an interrupt was requested. Script that `f` runs, such as a `then` getter or an
+/// executor, stays interruptible.
+unsafe fn deferring_interrupts<R>(cx: *mut root::JSContext, f: impl FnOnce() -> R) -> R {
+    struct Restore<'a>(&'a Cell<Option<usize>>, Option<usize>);
+    impl Drop for Restore<'_> {
+        fn drop(&mut self) {
+            self.0.set(self.1);
+        }
+    }
+    let cx = Cx::from_raw(cx);
+    let deferred_at = &cx.hooks.interrupts_deferred_at;
+    let mark = super::error::innermost_frame(cx);
+    let _restore = Restore(deferred_at, deferred_at.replace(Some(mark)));
+    f()
+}
+
 pub(crate) unsafe fn NewPromiseObject(
+    cx: *mut root::JSContext,
+    executor: root::JS::HandleObject,
+) -> *mut root::JSObject {
+    deferring_interrupts(cx, || new_promise_object(cx, executor))
+}
+
+unsafe fn new_promise_object(
     cx: *mut root::JSContext,
     executor: root::JS::HandleObject,
 ) -> *mut root::JSObject {
@@ -187,13 +216,15 @@ unsafe fn settle(
     value: root::JS::HandleValue,
     reject: bool,
 ) -> bool {
-    let cx = Cx::from_raw(cx);
-    q::JS_SettlePromise(
-        cx.qctx(),
-        obj_val(*promise.ptr),
-        (*value.ptr).to_qjs(),
-        reject as c_int,
-    ) >= 0
+    deferring_interrupts(cx, || {
+        let cx = Cx::from_raw(cx);
+        q::JS_SettlePromise(
+            cx.qctx(),
+            obj_val(*promise.ptr),
+            (*value.ptr).to_qjs(),
+            reject as c_int,
+        ) >= 0
+    })
 }
 
 pub(crate) unsafe fn ResolvePromise(
@@ -217,9 +248,11 @@ unsafe fn original_resolve(
     value: root::JS::HandleValue,
     reject: bool,
 ) -> *mut root::JSObject {
-    let cx = Cx::from_raw(cx);
-    let p = q::JS_PromiseResolve(cx.qctx(), (*value.ptr).to_qjs(), reject as c_int);
-    super::class::adopt_object(cx, p)
+    deferring_interrupts(cx, || {
+        let cx = Cx::from_raw(cx);
+        let p = q::JS_PromiseResolve(cx.qctx(), (*value.ptr).to_qjs(), reject as c_int);
+        super::class::adopt_object(cx, p)
+    })
 }
 
 pub(crate) unsafe fn CallOriginalPromiseResolve(
@@ -757,11 +790,21 @@ pub(crate) unsafe fn JS_RequestInterruptCallbackCanWait(cx: *mut root::JSContext
     request_interrupt(cx);
 }
 
-/// QuickJS polls this while running script; a non-zero result terminates the script with an
-/// uncatchable exception.
+/// QuickJS polls this while running script and on every call; a positive result terminates the
+/// script with an uncatchable exception. While a promise operation defers interrupts and no script
+/// runs in it, a requested interrupt stays pending, and the negative result makes QuickJS poll again
+/// at its next check (Q36), so a loop that keeps creating promises can't defer it forever.
 unsafe extern "C" fn interrupt_handler(rt: *mut q::JSRuntime, opaque: *mut c_void) -> c_int {
     let _ = rt;
     let cx = hook_cx(opaque);
+    if !cx.hooks.interrupt_requested.load(Ordering::SeqCst) {
+        return 0;
+    }
+    if let Some(mark) = cx.hooks.interrupts_deferred_at.get() {
+        if !super::error::script_since(cx, mark) {
+            return -1;
+        }
+    }
     if !cx.hooks.interrupt_requested.swap(false, Ordering::SeqCst) {
         return 0;
     }
