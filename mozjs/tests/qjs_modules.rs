@@ -377,6 +377,11 @@ unsafe fn error_name(cx: &mut JSContext, error: JSVal) -> String {
 
 /// Compiles and runs a classic script with private id `id`, like Servo's `evaluate_script`.
 unsafe fn run_classic(cx: &mut JSContext, url: &str, source: &str, id: usize) {
+    assert!(execute_classic(cx, url, source, id));
+}
+
+/// Runs a classic script; returns whether it completed.
+unsafe fn execute_classic(cx: &mut JSContext, url: &str, source: &str, id: usize) -> bool {
     let options = CompileOptionsWrapper::new(cx, CString::new(url).unwrap(), 1);
     let script = mozjs::rust::wrappers2::Compile1(
         cx,
@@ -388,11 +393,7 @@ unsafe fn run_classic(cx: &mut JSContext, url: &str, source: &str, id: usize) {
     jsapi::SetScriptPrivate(script, &private);
     rooted!(&in(cx) let script: *mut JSScript = script);
     rooted!(&in(cx) let mut rval = UndefinedValue());
-    assert!(mozjs::rust::wrappers2::JS_ExecuteScript(
-        cx,
-        script.handle(),
-        rval.handle_mut()
-    ));
+    mozjs::rust::wrappers2::JS_ExecuteScript(cx, script.handle(), rval.handle_mut())
 }
 
 /// The engine can be initialized once per process; the tests share it and never shut it down.
@@ -703,6 +704,264 @@ fn top_level_await_rejection_is_reported() {
             .rejections
             .iter()
             .all(|&(p, handled)| p != promise.get() as *mut c_void || handled)));
+    });
+}
+
+unsafe extern "C" fn terminate(_: *mut RawJSContext) -> bool {
+    false
+}
+
+/// `requestTermination()`: requests an interrupt, which the next poll handles.
+unsafe extern "C" fn request_termination(cx: *mut RawJSContext, _: u32, _: *mut Value) -> bool {
+    jsapi::JS_RequestInterruptCallback(cx);
+    true
+}
+
+/// Defines `requestTermination()` and an interrupt callback that terminates: `stop()` terminates
+/// the module that calls it, inside its loop.
+unsafe fn add_termination(cx: &mut JSContext, global: *mut JSObject) {
+    assert!(jsapi::JS_AddInterruptCallback(cx.raw_cx(), Some(terminate)));
+    assert!(!jsapi::JS_DefineFunction(
+        cx.raw_cx(),
+        h(&global),
+        c"requestTermination".as_ptr(),
+        Some(request_termination),
+        0,
+        0
+    )
+    .is_null());
+    run_classic(
+        cx,
+        "stop.js",
+        "function stop() { requestTermination(); for (let i = 0; i < 1e5; i++) {} }",
+        0,
+    );
+}
+
+/// QuickJS's pending exception, which `JS_IsExceptionPending` clears if it is a termination: `Some`
+/// with whether it is a termination. `function` is a function of the realm, which QuickJS maps to
+/// its context.
+unsafe fn qjs_pending(function: *mut JSObject) -> Option<bool> {
+    let realm = qjs::JS_GetObjectRealm(qjs::JSValue::mkptr(
+        qjs::JS_TAG_OBJECT,
+        function as *mut c_void,
+    ));
+    assert!(!realm.is_null());
+    (qjs::JS_HasException(realm) != 0).then(|| qjs::JS_HasUncatchableException(realm) != 0)
+}
+
+/// A module evaluation that is terminated, by an interrupt callback that returns false, rejects
+/// its promise with undefined and leaves no exception pending, as in SpiderMonkey; no more of the
+/// graph runs (Q37).
+#[test]
+fn terminated_evaluation() {
+    add_sources(&[
+        (
+            "main.js",
+            "import './stopping.js';\nglobalThis.mainRan = true;",
+        ),
+        ("stopping.js", "stop();\nglobalThis.stoppingRan = true;"),
+        ("tla.js", "await null;\nstop();\nglobalThis.tlaRan = true;"),
+        (
+            "tla-before-await.js",
+            "stop();\nawait null;\nglobalThis.tlaRan = true;",
+        ),
+    ]);
+    with_realm(|cx| unsafe {
+        let global = jsapi::CurrentGlobalOrNull(cx.raw_cx());
+        add_termination(cx, global);
+        let function = get(cx, global, c"Object").to_object();
+
+        rooted!(&in(cx) let root = load_graph(cx, &url("main.js")));
+        assert!(ModuleLink(cx, root.handle()));
+        rooted!(&in(cx) let mut promise = UndefinedValue());
+        assert!(ModuleEvaluate(cx, root.handle(), promise.handle_mut()));
+        assert_eq!(qjs_pending(function), None);
+        rooted!(&in(cx) let evaluation = promise.get().to_object());
+        assert_eq!(promise_state(evaluation.get()), qjs::JS_PROMISE_REJECTED);
+        assert!(!ThrowOnModuleEvaluationFailure(
+            cx,
+            evaluation.handle(),
+            ModuleErrorBehaviour::ThrowModuleErrorsSync
+        ));
+        assert!(pending_exception(cx).is_undefined());
+        run_jobs(cx);
+        assert!(get(cx, global, c"stoppingRan").is_undefined());
+        assert!(get(cx, global, c"mainRan").is_undefined());
+
+        // A later evaluation gets the same rejected promise, and script still runs.
+        assert!(ModuleEvaluate(cx, root.handle(), promise.handle_mut()));
+        assert_eq!(promise.get().to_object(), evaluation.get());
+        run_classic(cx, "after.js", "globalThis.afterRan = true;", 0);
+        assert!(get(cx, global, c"afterRan").to_boolean());
+
+        // Before top-level await, as without it.
+        rooted!(&in(cx) let tla = load_graph(cx, &url("tla-before-await.js")));
+        assert!(ModuleLink(cx, tla.handle()));
+        rooted!(&in(cx) let mut promise = UndefinedValue());
+        assert!(ModuleEvaluate(cx, tla.handle(), promise.handle_mut()));
+        assert_eq!(qjs_pending(function), None);
+        rooted!(&in(cx) let evaluation = promise.get().to_object());
+        assert_eq!(promise_state(evaluation.get()), qjs::JS_PROMISE_REJECTED);
+        assert!(!ThrowOnModuleEvaluationFailure(
+            cx,
+            evaluation.handle(),
+            ModuleErrorBehaviour::ThrowModuleErrorsSync
+        ));
+        assert!(pending_exception(cx).is_undefined());
+
+        // After top-level await, the termination leaves the job, uncaught, and the evaluation
+        // pending, as SpiderMonkey leaves a terminated async function.
+        rooted!(&in(cx) let tla = load_graph(cx, &url("tla.js")));
+        assert!(ModuleLink(cx, tla.handle()));
+        rooted!(&in(cx) let mut promise = UndefinedValue());
+        assert!(ModuleEvaluate(cx, tla.handle(), promise.handle_mut()));
+        run_jobs(cx);
+        assert_eq!(qjs_pending(function), Some(true));
+        assert!(!jsapi::JS_IsExceptionPending(cx.raw_cx()));
+        assert_eq!(
+            promise_state(promise.get().to_object()),
+            qjs::JS_PROMISE_PENDING
+        );
+        assert!(get(cx, global, c"tlaRan").is_undefined());
+    });
+}
+
+/// A module that runs after an asynchronous dependency, and is terminated, rejects with undefined,
+/// as do the modules that import it; the other modules waiting for that dependency still run, as
+/// in SpiderMonkey (Q37).
+#[test]
+fn terminated_async_evaluation() {
+    add_sources(&[
+        ("dependency.js", "await null;"),
+        (
+            "stopping.js",
+            "import './dependency.js';\nstop();\nglobalThis.stoppingRan = true;",
+        ),
+        (
+            "other.js",
+            "import './dependency.js';\nglobalThis.otherRan = true;",
+        ),
+        (
+            "main.js",
+            "import './stopping.js';\nimport './other.js';\nglobalThis.mainRan = true;",
+        ),
+        ("tla-dependency.js", "await null;"),
+        (
+            "tla-stopping.js",
+            "import './tla-dependency.js';\nstop();\nawait null;\nglobalThis.stoppingRan = true;",
+        ),
+        (
+            "tla-other.js",
+            "import './tla-dependency.js';\nglobalThis.otherRan = true;",
+        ),
+        (
+            "tla-main.js",
+            "import './tla-stopping.js';\nimport './tla-other.js';\nglobalThis.mainRan = true;",
+        ),
+    ]);
+    with_realm(|cx| unsafe {
+        let global = jsapi::CurrentGlobalOrNull(cx.raw_cx());
+        add_termination(cx, global);
+        let function = get(cx, global, c"Object").to_object();
+        for main in ["main.js", "tla-main.js"] {
+            run_classic(cx, "reset.js", "globalThis.otherRan = false;", 0);
+            rooted!(&in(cx) let root = load_graph(cx, &url(main)));
+            assert!(ModuleLink(cx, root.handle()));
+            rooted!(&in(cx) let mut promise = UndefinedValue());
+            assert!(ModuleEvaluate(cx, root.handle(), promise.handle_mut()));
+            rooted!(&in(cx) let evaluation = promise.get().to_object());
+            assert_eq!(
+                promise_state(evaluation.get()),
+                qjs::JS_PROMISE_PENDING,
+                "{main}"
+            );
+            run_jobs(cx);
+            assert_eq!(qjs_pending(function), None, "{main}");
+            assert_eq!(
+                promise_state(evaluation.get()),
+                qjs::JS_PROMISE_REJECTED,
+                "{main}"
+            );
+            assert!(!ThrowOnModuleEvaluationFailure(
+                cx,
+                evaluation.handle(),
+                ModuleErrorBehaviour::ThrowModuleErrorsSync
+            ));
+            assert!(pending_exception(cx).is_undefined(), "{main}");
+            assert!(get(cx, global, c"stoppingRan").is_undefined(), "{main}");
+            assert!(get(cx, global, c"mainRan").is_undefined(), "{main}");
+            assert!(get(cx, global, c"otherRan").to_boolean(), "{main}");
+        }
+    });
+}
+
+/// While only built-ins run, `ModuleEvaluate` leaves a requested interrupt pending, as SpiderMonkey
+/// checks for interrupts only in script and Servo expects the evaluation to succeed (Q36, Q37):
+/// only module code is terminated.
+#[test]
+fn module_evaluation_defers_interrupts() {
+    add_sources(&[("plain.js", "globalThis.plainRan = true;")]);
+    with_realm(|cx| unsafe {
+        let global = jsapi::CurrentGlobalOrNull(cx.raw_cx());
+        add_termination(cx, global);
+        rooted!(&in(cx) let root = load_graph(cx, &url("plain.js")));
+        assert!(ModuleLink(cx, root.handle()));
+
+        // Promise creation defers the interrupt too, at QuickJS's next poll after 10,000 calls
+        // at most, and then QuickJS polls at every call: at the first one of the evaluation.
+        jsapi::JS_RequestInterruptCallback(cx.raw_cx());
+        let executor = ptr::null_mut::<JSObject>();
+        for _ in 0..20_000 {
+            assert!(!jsapi::NewPromiseObject(cx.raw_cx(), h(&executor)).is_null());
+        }
+        rooted!(&in(cx) let mut promise = UndefinedValue());
+        assert!(ModuleEvaluate(cx, root.handle(), promise.handle_mut()));
+        rooted!(&in(cx) let evaluation = promise.get().to_object());
+        assert_eq!(promise_state(evaluation.get()), qjs::JS_PROMISE_REJECTED);
+        assert!(!ThrowOnModuleEvaluationFailure(
+            cx,
+            evaluation.handle(),
+            ModuleErrorBehaviour::ThrowModuleErrorsSync
+        ));
+        assert!(pending_exception(cx).is_undefined());
+        assert!(get(cx, global, c"plainRan").is_undefined());
+    });
+}
+
+/// An asynchronous module subscribes to its body's promise with PerformPromiseThen, as in the
+/// spec: without looking up the promise's `constructor`, a getter that could run script after a
+/// termination (Q37).
+#[test]
+fn async_module_does_not_look_up_constructor() {
+    add_sources(&[
+        ("awaiting.js", "await null;\nglobalThis.awaited = true;"),
+        (
+            "after-awaiting.js",
+            "import './awaiting.js';\nglobalThis.afterRan = true;",
+        ),
+    ]);
+    with_realm(|cx| unsafe {
+        let global = jsapi::CurrentGlobalOrNull(cx.raw_cx());
+        run_classic(
+            cx,
+            "constructor.js",
+            "globalThis.lookups = 0;
+             Object.defineProperty(Promise.prototype, 'constructor', {
+               get() { globalThis.lookups++; return Promise; }, configurable: true });",
+            0,
+        );
+        rooted!(&in(cx) let root = load_graph(cx, &url("after-awaiting.js")));
+        assert!(ModuleLink(cx, root.handle()));
+        rooted!(&in(cx) let mut promise = UndefinedValue());
+        assert!(ModuleEvaluate(cx, root.handle(), promise.handle_mut()));
+        run_jobs(cx);
+        assert_eq!(
+            promise_state(promise.get().to_object()),
+            qjs::JS_PROMISE_FULFILLED
+        );
+        assert!(get(cx, global, c"afterRan").to_boolean());
+        assert_eq!(get(cx, global, c"lookups").to_int32(), 0);
     });
 }
 

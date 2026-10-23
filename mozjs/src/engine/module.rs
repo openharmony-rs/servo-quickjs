@@ -733,7 +733,9 @@ unsafe fn host_load_imported_module(
         return true;
     }
     let raw = cx.as_raw();
-    if q::JS_HasException(cx.qctx()) != 0 {
+    // As in SpiderMonkey, a termination is no pending exception: the load fails with undefined
+    // (Q37), not with QuickJS's uncatchable error.
+    if super::exception::JS_IsExceptionPending(raw) {
         FinishLoadingImportedModuleFailedWithPendingException(raw, handle(&payload))
     } else {
         let undefined = JSVal::from_qjs(q::JS_UNDEFINED);
@@ -996,8 +998,12 @@ pub(crate) unsafe fn ModuleEvaluate(
         q::JS_ThrowTypeError(qctx, c"module is not linked".as_ptr());
         return false;
     }
-    // Returns the evaluation promise (rejected on evaluation errors); consumes a reference.
-    let promise = q::JS_EvalFunction(qctx, q::JS_DupValueRT(cx.rt, module_val(m)));
+    // Returns the evaluation promise (rejected on evaluation errors); consumes a reference. As in
+    // SpiderMonkey, only module code can be terminated: a terminated module rejects it with
+    // undefined (Q37).
+    let promise = super::promise::deferring_interrupts(cx.as_raw(), || {
+        q::JS_EvalFunction(qctx, q::JS_DupValueRT(cx.rt, module_val(m)))
+    });
     if promise.tag() == q::JS_TAG_EXCEPTION {
         return false;
     }

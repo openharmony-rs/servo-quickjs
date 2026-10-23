@@ -92,12 +92,12 @@ unsafe fn promise_state(promise: *mut root::JSObject) -> Option<q::JSPromiseStat
     (state <= q::JS_PROMISE_REJECTED).then_some(state)
 }
 
-/// Runs `f`, a promise operation, with a pending interrupt left pending while only built-in and
-/// native functions run (Q36). QuickJS polls for interrupts on every call, of its own built-ins
-/// too, where SpiderMonkey checks only in script, so creating or settling a promise never fails
-/// there because an interrupt was requested. Script that `f` runs, such as a `then` getter or an
-/// executor, stays interruptible.
-unsafe fn deferring_interrupts<R>(cx: *mut root::JSContext, f: impl FnOnce() -> R) -> R {
+/// Runs `f`, a promise operation or a module evaluation, with a pending interrupt left pending
+/// while only built-in and native functions run (Q36, Q37). QuickJS polls for interrupts on every
+/// call, of its own built-ins too, where SpiderMonkey checks only in script, so creating or
+/// settling a promise never fails there because an interrupt was requested. Script that `f` runs,
+/// such as a `then` getter, an executor or module code, stays interruptible.
+pub(crate) unsafe fn deferring_interrupts<R>(cx: *mut root::JSContext, f: impl FnOnce() -> R) -> R {
     struct Restore<'a>(&'a Cell<Option<usize>>, Option<usize>);
     impl Drop for Restore<'_> {
         fn drop(&mut self) {
