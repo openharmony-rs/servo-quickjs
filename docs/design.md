@@ -176,6 +176,8 @@ As SpiderMonkey does for web compatibility, formatted dates and times have U+002
 
 `servo-quickjs/quickjs` is Bellard's QuickJS at the commit in `servo-quickjs/quickjs/UPSTREAM`, patched locally. Each patch is marked with a `/* Servo: ... */` comment and committed separately with a `quickjs:` prefix.
 
+`just test262` runs test262, at the commit Bellard's Makefile pins and checked out in the target directory, with Bellard's `run-test262.c`, `quickjs-libc.c`, `test262.conf`, `test262_errors.txt` and `tests/test262.patch` from the same commit, under ASan, LSan and UBSan, with `-fwrapv` as `build.rs`; CI runs it too. Only `test262.conf` (Servo's `Array.fromAsync` is tested) and `quickjs-libc.c` (Q38) are changed; Servo's QuickJS fails the same 15 tests as Bellard's.
+
 | # | Patch | Size |
 |---|---|---|
 | Q1 | Global object of an embedder class (`JS_SetGlobalObjectClass`; an `is_global_object` bit replaces `class_id == JS_CLASS_GLOBAL_OBJECT`), and exotic keys collected before the shape during enumeration, so lazy global resolution can't overflow the key table (`0cd8942`) | small |

@@ -31,6 +31,42 @@ test-pool-stats *args:
 test-asan *args:
     CC={{clang}} CFLAGS="-fsanitize=address,undefined {{ubsan}}" RUSTFLAGS="-Zsanitizer=address -C force-frame-pointers=yes" LSAN_OPTIONS=suppressions={{justfile_directory()}}/tools/lsan.supp CARGO_TARGET_DIR={{target}}/asan cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu -p mozjs {{args}} -- {{by_design}}
 
+# The test262 commit that bellard's Makefile pins (TEST262_COMMIT), which tests/test262.patch applies to.
+test262_commit := "7ab7fafa0003f73fc85c1b95d88094d33f7eb8bd"
+# Out of servo-quickjs/quickjs, which build.rs watches: test262, the config and known errors (linked), the report.
+test262_dir := target + "/test262"
+
+# Fetch test262 at `test262_commit`, patched, into `test262_dir`, next to links to test262.conf and test262_errors.txt.
+test262-fetch:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p {{test262_dir}}
+    cd {{test262_dir}}
+    ln -sf {{justfile_directory()}}/servo-quickjs/quickjs/test262.conf {{justfile_directory()}}/servo-quickjs/quickjs/test262_errors.txt .
+    if [ "$(git -C test262 rev-parse HEAD 2>/dev/null)" != {{test262_commit}} ]; then
+        rm -rf test262
+        git init -q test262
+        git -C test262 fetch -q --depth 1 https://github.com/tc39/test262.git {{test262_commit}}
+        git -C test262 checkout -q FETCH_HEAD
+        patch -d test262 -p1 -s < {{justfile_directory()}}/servo-quickjs/quickjs/tests/test262.patch
+    fi
+
+# Run test262 under ASan, LSan and UBSan, with build.rs's -fwrapv; fails on results other than test262_errors.txt (`-u` updates it).
+test262 *args: test262-fetch
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd servo-quickjs/quickjs
+    flags=(-O2 -g -fwrapv -fsanitize=address,undefined {{ubsan}} -fno-omit-frame-pointer -D_GNU_SOURCE
+           -DCONFIG_VERSION="\"$(cat VERSION)\"")
+    objs=()
+    for f in quickjs dtoa libregexp libunicode cutils quickjs-libc run-test262; do
+        {{clang}} "${flags[@]}" -c $f.c -o {{test262_dir}}/$f.o
+        objs+=({{test262_dir}}/$f.o)
+    done
+    {{clang}} "${flags[@]}" -o {{test262_dir}}/run-test262 "${objs[@]}" -lm -lpthread -ldl
+    cd {{test262_dir}}
+    ./run-test262 -m -c test262.conf -a -T "$(nproc)" {{args}}
+
 # Fail if the QuickJS bindings are out of date.
 check-bindings: gen-bindings
     git diff --exit-code servo-quickjs/src/bindings.rs

@@ -68,6 +68,27 @@ jobs:
       - name: Pool tests in an optimized build under ASan
         run: just test-asan --release --test qjs_pool
 
+  test262:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      # run-test262 links clang's own sanitizer runtimes; the Rust tests link Rust's.
+      - name: Sanitizer runtimes and symbolizer
+        run: |
+          if ! echo 'int main(void) { return 0; }' | "$CLANG" -fsanitize=address,undefined -x c - -o /dev/null; then
+            sudo apt-get update && sudo apt-get install -y "libclang-rt-${CLANG#clang-}-dev"
+          fi
+          if ! command -v "${CLANG/clang/llvm-symbolizer}" > /dev/null; then
+            sudo apt-get update && sudo apt-get install -y "${CLANG/clang/llvm}"
+          fi
+          symbolizer=$(command -v "${CLANG/clang/llvm-symbolizer}")
+          echo "ASAN_SYMBOLIZER_PATH=$symbolizer" >> "$GITHUB_ENV"
+      - name: test262 under ASan, LSan and UBSan
+        run: just test262
+
   fuzz:
     runs-on: ubuntu-24.04
     steps:
