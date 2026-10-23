@@ -3,7 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 //! Fixes to Bellard's QuickJS built-ins that are not about the embedding. Undefined behavior that
-//! UBSan reports is fixed without changing results, which these tests pin.
+//! UBSan reports is fixed without changing results, which these tests pin; under `just test-asan`,
+//! which also runs UBSan, the undefined behavior aborts them.
 
 use std::ptr::{self, NonNull};
 use std::sync::OnceLock;

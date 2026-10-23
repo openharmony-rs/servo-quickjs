@@ -13,6 +13,8 @@ gen-bindings:
 by_design := "--skip capture_stack --skip virtual_trace_called --skip custom_auto_rooter_macro"
 clang := env_var_or_default("CLANG", "clang-20")
 clangxx := replace(clang, "clang", "clang++")
+# UBSan reports abort, so they fail a test or are kept as fuzzing crashes.
+ubsan := "-fno-sanitize-recover=undefined"
 
 test *args:
     CARGO_TARGET_DIR={{target}} cargo test -p mozjs {{args}} -- {{by_design}}
@@ -25,9 +27,9 @@ test-verify *args:
 test-pool-stats *args:
     QJS_POOL_STATS=1 CARGO_TARGET_DIR={{target}}/pool-stats cargo test -p mozjs {{args}} -- {{by_design}}
 
-# Run the tests under ASan and LSan, QuickJS's C code included; `tools/lsan.supp` lists the leaks that are by design.
+# Run the tests under ASan, LSan and UBSan, QuickJS's C code included; `tools/lsan.supp` lists the leaks that are by design.
 test-asan *args:
-    CC={{clang}} CFLAGS=-fsanitize=address RUSTFLAGS="-Zsanitizer=address -C force-frame-pointers=yes" LSAN_OPTIONS=suppressions={{justfile_directory()}}/tools/lsan.supp CARGO_TARGET_DIR={{target}}/asan cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu -p mozjs {{args}} -- {{by_design}}
+    CC={{clang}} CFLAGS="-fsanitize=address,undefined {{ubsan}}" RUSTFLAGS="-Zsanitizer=address -C force-frame-pointers=yes" LSAN_OPTIONS=suppressions={{justfile_directory()}}/tools/lsan.supp CARGO_TARGET_DIR={{target}}/asan cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu -p mozjs {{args}} -- {{by_design}}
 
 # Fail if the QuickJS bindings are out of date.
 check-bindings: gen-bindings
@@ -51,10 +53,10 @@ wpt log *tests:
 
 fuzz_target := absolute_path(env_var_or_default("FUZZ_TARGET_DIR", target + "/fuzz"))
 
-# Fuzz a target (clone_read, eval, strings) under ASan, QuickJS's C code included; extra args go to libFuzzer.
+# Fuzz a target (clone_read, eval, strings) under ASan and UBSan, QuickJS's C code included; extra args go to libFuzzer.
 # The host target is passed explicitly: a prebuilt cargo-fuzz (a musl binary) defaults to its own target.
 fuzz target *args:
-    CC={{clang}} CXX={{clangxx}} CFLAGS="-fsanitize=address,fuzzer-no-link" LIBCLANG_PATH={{libclang}} CARGO_TARGET_DIR={{fuzz_target}} cargo +nightly fuzz run --target "$(rustc +nightly -vV | sed -n 's/^host: //p')" {{target}} fuzz/corpus/{{target}} -- {{args}}
+    CC={{clang}} CXX={{clangxx}} CFLAGS="-fsanitize=address,undefined,fuzzer-no-link {{ubsan}}" LIBCLANG_PATH={{libclang}} CARGO_TARGET_DIR={{fuzz_target}} cargo +nightly fuzz run --target "$(rustc +nightly -vV | sed -n 's/^host: //p')" {{target}} fuzz/corpus/{{target}} -- {{args}}
 
 # Run each fuzz target for `seconds` from its corpus.
 fuzz-smoke seconds="60":

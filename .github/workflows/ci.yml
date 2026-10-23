@@ -62,7 +62,7 @@ jobs:
           echo "ASAN_SYMBOLIZER_PATH=$symbolizer" >> "$GITHUB_ENV"
       - name: System ICU, for the Intl subset
         run: pkg-config --exists icu-i18n || (sudo apt-get update && sudo apt-get install -y libicu-dev)
-      - name: Tests under ASan and LSan
+      - name: Tests under ASan, LSan and UBSan
         run: just test-asan
       # Optimized builds lost the pool entries pushed while the pool drains (engine/mod.rs).
       - name: Pool tests in an optimized build under ASan
