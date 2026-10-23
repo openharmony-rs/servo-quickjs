@@ -59,3 +59,20 @@ fn normalization() {
     let result = eval_string("'e\\u0301'.repeat(1000).normalize('NFC').length.toString()");
     assert_eq!(result, "1000");
 }
+
+/// `slice` of a typed array whose buffer shrank to nothing while `slice` converted its start: a
+/// zeroed result of the requested length, without a copy (Q39).
+#[test]
+fn slice_of_a_source_shrunk_to_nothing() {
+    let result = eval_string(
+        "var results = [];
+         for (var start = 0; start <= 4; start++) {
+           var buffer = new ArrayBuffer(16, { maxByteLength: 16 });
+           var source = new Int32Array(buffer).fill(1);
+           var sliced = source.slice({ valueOf() { buffer.resize(0); return start; } });
+           results.push(sliced.length + ':' + sliced.join(''));
+         }
+         results.join()",
+    );
+    assert_eq!(result, "4:0000,3:000,2:00,1:0,0:");
+}
