@@ -76,3 +76,20 @@ fn slice_of_a_source_shrunk_to_nothing() {
     );
     assert_eq!(result, "4:0000,3:000,2:00,1:0,0:");
 }
+
+/// ArrayBuffer converts `maxByteLength` with ToIndex: a value that is not an index throws a
+/// RangeError, where it wrapped modulo 2^64. SharedArrayBuffer, not exposed here, shares the code
+/// (Q40).
+#[test]
+fn max_byte_length_is_an_index() {
+    let result = eval_string(
+        "[2 ** 64 + 4096, Infinity, -Infinity, -1, -(2 ** 63), 2 ** 53, 4096, NaN, -0.5].map(value => {
+           try { return String(new ArrayBuffer(0, { maxByteLength: value }).maxByteLength); }
+           catch (e) { return e.name; }
+         }).join()",
+    );
+    assert_eq!(
+        result,
+        "RangeError,RangeError,RangeError,RangeError,RangeError,RangeError,4096,0,0"
+    );
+}

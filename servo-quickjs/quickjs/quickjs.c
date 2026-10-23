@@ -58101,7 +58101,9 @@ static JSValue js_array_buffer_constructor0(JSContext *ctx, JSValueConst new_tar
         return JS_EXCEPTION;
     if (JS_IsUndefined(val))
         goto next;
-    if (JS_ToInt64Free(ctx, &i, val))
+    /* Servo: ToIndex, as for the length: a value that is not an index
+       throws, instead of wrapping modulo 2^64 (Q40) */
+    if (JS_ToInt64SatFree(ctx, &i, val, FALSE))
         return JS_EXCEPTION;
     // don't have to check i < 0 because len >= 0
     if (len > i || i > MAX_SAFE_INTEGER)
