@@ -231,10 +231,123 @@ impl Tracer {
     unsafe fn mark(trc: *mut root::JSTracer, v: q::JSValue) {
         let trc = &*(trc as *mut Tracer);
         if v.has_ref_count() {
-            super::verify::mark(v, trc.mark);
+            super::verify::mark(trc.rt, v, trc.mark);
             q::JS_MarkValue(trc.rt, v, trc.mark);
         }
     }
+}
+
+/// What one collection found of a shared `Rc`.
+#[derive(Default)]
+struct SharedRc {
+    /// Owners traced in the decrement pass.
+    owners_traced: usize,
+    /// The contents were marked in the decrement pass.
+    decremented: bool,
+    /// The contents were marked in the scan pass.
+    restored: bool,
+    /// With the tracing verifier: the strong count and the handles of the decrement pass's visits.
+    owners: usize,
+    handles: Vec<usize>,
+}
+
+/// The shared `Rc`s that one collection met, by address.
+struct SharedRcs {
+    rt: *mut q::JSRuntime,
+    gc_number: u32,
+    rcs: HashMap<usize, SharedRc>,
+}
+
+thread_local! {
+    static SHARED_RCS: std::cell::RefCell<SharedRcs> = std::cell::RefCell::new(SharedRcs {
+        rt: ptr::null_mut(),
+        gc_number: 0,
+        rcs: HashMap::new(),
+    });
+}
+
+/// Whether a trace hook that reached the `Rc` at `rc` through the handle at `handle` traces its
+/// contents now; `owners` is its strong count.
+///
+/// The cycle collector subtracts every mark of its decrement pass from the marked object's
+/// reference count and adds every mark of its scan pass back, and the contents hold one count per
+/// reference however many owners share them. So they are marked in the decrement pass only when
+/// the last owner is traced, which proves that no owner is outside the objects the collector sees,
+/// and then once more on the first visit of the scan pass, from a live owner if there is one.
+/// While an owner is held elsewhere (a Rust local, a task), the contents are never marked and count
+/// as referenced from outside. Outside a collection (debugging walks) they are always traced.
+///
+/// This counts owners by visits, so a trace hook must trace each of its handles once per pass, and
+/// only handles it owns: tracing one twice, or a temporary clone, while an owner is outside the
+/// heap would free the contents under that owner. The tracing verifier checks both.
+pub(crate) unsafe fn trace_shared_rc(
+    trc: *mut root::JSTracer,
+    rc: usize,
+    handle: usize,
+    owners: usize,
+) -> bool {
+    let rt = (*(trc as *mut Tracer)).rt;
+    let mut number = 0;
+    let pass = q::JS_GetGCPass(rt, &mut number) as u32;
+    if pass != q::JS_GC_PASS_DECREF && pass != q::JS_GC_PASS_SCAN {
+        return true;
+    }
+    // Without the table (thread exit), neither pass marks the contents.
+    SHARED_RCS
+        .try_with(|shared| {
+            let mut shared = shared.borrow_mut();
+            if shared.rt != rt || shared.gc_number != number {
+                shared.rt = rt;
+                shared.gc_number = number;
+                shared.rcs.clear();
+            }
+            let entry = shared.rcs.entry(rc).or_default();
+            if pass == q::JS_GC_PASS_DECREF {
+                if super::verify::enabled() {
+                    verify_shared_rc_visit(entry, rc, handle, owners);
+                }
+                entry.owners_traced += 1;
+                if entry.owners_traced == owners && !entry.decremented {
+                    entry.decremented = true;
+                    return true;
+                }
+                false
+            } else if entry.decremented && !entry.restored {
+                entry.restored = true;
+                true
+            } else {
+                false
+            }
+        })
+        .unwrap_or(false)
+}
+
+fn verify_shared_rc_visit(entry: &mut SharedRc, rc: usize, handle: usize, owners: usize) {
+    let problem = if entry.handles.contains(&handle) {
+        format!("traced through the handle at {handle:#x} twice")
+    } else if entry.owners != 0 && entry.owners != owners {
+        format!("traced with {} and with {owners} owners", entry.owners)
+    } else {
+        entry.owners = owners;
+        entry.handles.push(handle);
+        return;
+    };
+    eprintln!(
+        "QuickJS tracing verifier: the shared Rc at {rc:#x} was {problem} in one GC pass; \
+         its contents could be freed while an owner outside the heap holds them\n{}",
+        std::backtrace::Backtrace::force_capture()
+    );
+    std::process::abort();
+}
+
+/// Forgets the shared `Rc`s of a runtime being destroyed: a later runtime may get its address and
+/// its collection numbers.
+pub(crate) fn forget_shared_rcs() {
+    let _ = SHARED_RCS.try_with(|shared| {
+        let mut shared = shared.borrow_mut();
+        shared.rt = ptr::null_mut();
+        shared.rcs = HashMap::new();
+    });
 }
 
 unsafe extern "C" fn gc_mark(rt: *mut q::JSRuntime, val: q::JSValue, mark: q::JS_MarkFunc) {

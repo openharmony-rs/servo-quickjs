@@ -1144,6 +1144,15 @@ JSAtom JS_GetScriptFileName(JSContext *ctx, JSValueConst script);
 /* Servo (debugging): the number of live objects of each class id below 'len' (other
    counts are not computed), and the runtime's number of class ids. */
 uint32_t JS_CountObjectsByClass(JSRuntime *rt, uint32_t *counts, uint32_t len);
+/* Servo (patch Q41): the cycle collector pass in progress, for trace hooks of
+   embedder objects that share references: JS_GC_PASS_DECREF subtracts every
+   mark from the marked object's reference count, JS_GC_PASS_SCAN adds every
+   mark back. '*gc_number' numbers the decrement passes: a scan pass has the
+   number of the decrement pass before it. */
+#define JS_GC_PASS_NONE   0
+#define JS_GC_PASS_DECREF 1
+#define JS_GC_PASS_SCAN   2
+int JS_GetGCPass(JSRuntime *rt, uint32_t *gc_number);
 /* Servo (debugging): called during each GC, before anything is freed, for every GC thing
    that is referenced from outside the GC heap ('ref_count' external references): the roots
    of the collection. 'gc_obj_type' is 0 for a JSObject ('ptr'), 5 for a JSContext. A last

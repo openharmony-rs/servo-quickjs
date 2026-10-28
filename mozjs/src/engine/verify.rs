@@ -8,7 +8,10 @@
 //! Rust trace hook that marks more often than Rust holds counted references (`Heap<T>`, Servo's
 //! `Dom<T>`) makes live objects look like garbage, and they are freed while still in use. The
 //! verifier tracks the counted references Rust holds per object and aborts when one collection
-//! pass marks an object more often from Rust trace hooks.
+//! pass marks an object more often from Rust trace hooks. Walks of the heap outside those passes
+//! (`QJS_GC_STATS=paths:<class>`) change no counts and are not checked. Shared `Rc`s, which count
+//! their owners by visits, abort when a pass traces one handle twice or sees the strong count
+//! change (`trace_shared_rc`).
 //!
 //! It also aborts when an object is freed while the autorelease pool holds it, which means some
 //! code released a reference it did not own. Pool references are never marked, so the cycle
@@ -41,7 +44,7 @@ thread_local! {
 static ENABLED: AtomicU8 = AtomicU8::new(0);
 
 #[inline]
-fn enabled() -> bool {
+pub(crate) fn enabled() -> bool {
     match ENABLED.load(Ordering::Relaxed) {
         0 => {
             let enabled = std::env::var_os("QJS_VERIFY_TRACING").is_some_and(|v| v != "0");
@@ -139,9 +142,14 @@ unsafe extern "C" fn object_freed(_rt: *mut q::JSRuntime, obj: q::JSValue) {
     }
 }
 
+/// Whether `rt`'s cycle collector is in a pass that counts marks (patch Q41).
+unsafe fn counting(rt: *mut q::JSRuntime) -> bool {
+    q::JS_GetGCPass(rt, std::ptr::null_mut()) as u32 != q::JS_GC_PASS_NONE
+}
+
 /// Checks a mark of `v` from a Rust trace hook during the pass that uses `mark_func`.
-pub(crate) unsafe fn mark(v: q::JSValue, mark_func: q::JS_MarkFunc) {
-    if !enabled() {
+pub(crate) unsafe fn mark(rt: *mut q::JSRuntime, v: q::JSValue, mark_func: q::JS_MarkFunc) {
+    if !enabled() || !counting(rt) {
         return;
     }
     if let Some(p) = gc_pointer(v) {
@@ -150,8 +158,12 @@ pub(crate) unsafe fn mark(v: q::JSValue, mark_func: q::JS_MarkFunc) {
 }
 
 /// Checks a mark of the QuickJS context `ctx` from a `gc_mark` hook of the shim.
-pub(crate) unsafe fn mark_context(ctx: *mut q::JSContext, mark_func: q::JS_MarkFunc) {
-    if enabled() {
+pub(crate) unsafe fn mark_context(
+    rt: *mut q::JSRuntime,
+    ctx: *mut q::JSContext,
+    mark_func: q::JS_MarkFunc,
+) {
+    if enabled() && counting(rt) {
         mark_pointer(ctx as usize, mark_func, || "QuickJS context".to_owned());
     }
 }

@@ -339,6 +339,10 @@ struct JSRuntime {
     struct list_head gc_zero_ref_count_list;
     struct list_head tmp_obj_list; /* used during GC */
     JSGCPhaseEnum gc_phase : 8;
+    /* Servo: the cycle collector pass in progress and the number of the
+       current decrement pass (JS_GetGCPass, patch Q41) */
+    uint8_t gc_pass;
+    uint32_t gc_number;
     size_t malloc_gc_threshold;
     struct list_head weakref_list; /* list of JSWeakRefHeader.link */
 #ifdef DUMP_LEAKS
@@ -6868,6 +6872,10 @@ static void gc_decref(JSRuntime *rt)
 
     init_list_head(&rt->tmp_obj_list);
 
+    /* Servo (patch Q41) */
+    rt->gc_pass = JS_GC_PASS_DECREF;
+    rt->gc_number++;
+
     /* decrement the refcount of all the children of all the GC
        objects and move the GC objects with zero refcount to
        tmp_obj_list */
@@ -6881,6 +6889,10 @@ static void gc_decref(JSRuntime *rt)
             list_add_tail(&p->link, &rt->tmp_obj_list);
         }
     }
+
+    /* Servo (patch Q41): the roots hook's walks between the passes change
+       no counts */
+    rt->gc_pass = JS_GC_PASS_NONE;
 }
 
 static void gc_scan_incref_child(JSRuntime *rt, JSGCObjectHeader *p)
@@ -6905,6 +6917,8 @@ static void gc_scan(JSRuntime *rt)
     struct list_head *el;
     JSGCObjectHeader *p;
 
+    rt->gc_pass = JS_GC_PASS_SCAN; /* Servo (patch Q41) */
+
     /* keep the objects with a refcount > 0 and their children. */
     list_for_each(el, &rt->gc_obj_list) {
         p = list_entry(el, JSGCObjectHeader, link);
@@ -6918,6 +6932,8 @@ static void gc_scan(JSRuntime *rt)
         p = list_entry(el, JSGCObjectHeader, link);
         mark_children(rt, p, gc_scan_incref_child2);
     }
+
+    rt->gc_pass = JS_GC_PASS_NONE; /* Servo (patch Q41) */
 }
 
 static void gc_free_cycles(JSRuntime *rt)
@@ -63166,6 +63182,14 @@ static int js_servo_dynamic_import(JSContext *ctx, JSValueConst specifier,
 
     return ctx->rt->dynamic_import_hook(ctx, m, script_private, specifier, attributes,
                                         promise, ctx->rt->dynamic_import_opaque);
+}
+
+/* Servo (patch Q41) */
+int JS_GetGCPass(JSRuntime *rt, uint32_t *gc_number)
+{
+    if (gc_number)
+        *gc_number = rt->gc_number;
+    return rt->gc_pass;
 }
 
 /* Servo (debugging): live objects per class */

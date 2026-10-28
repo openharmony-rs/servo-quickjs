@@ -60,7 +60,7 @@ pub(crate) unsafe fn mark_realm(
     mark: q::JS_MarkFunc,
 ) {
     if !realm.is_null() {
-        super::verify::mark_context((*realm).qctx, mark);
+        super::verify::mark_context(rt, (*realm).qctx, mark);
         q::JS_MarkContextRef(rt, (*realm).qctx, mark);
     }
 }

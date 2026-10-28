@@ -66,6 +66,7 @@ pub(crate) unsafe fn JS_DestroyContext(raw: *mut root::JSContext) {
     #[cfg(qjs_pool_stats)]
     super::pool_stats::report();
     super::verify::reset();
+    super::forget_shared_rcs();
     drop(Box::from_raw(raw as *mut Cx));
 }
 
