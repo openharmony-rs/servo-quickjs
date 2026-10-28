@@ -1855,6 +1855,22 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn JS_GetGCPass(rt: *mut JSRuntime, gc_number: *mut u32) -> ::std::os::raw::c_int;
 }
+pub type JSFinalizationRegistryJobHook = ::std::option::Option<
+    unsafe extern "C" fn(
+        rt: *mut JSRuntime,
+        realm: *mut JSContext,
+        cb: JSValue,
+        held_val: JSValue,
+        opaque: *mut ::std::os::raw::c_void,
+    ),
+>;
+unsafe extern "C" {
+    pub fn JS_SetFinalizationRegistryJobHook(
+        rt: *mut JSRuntime,
+        hook: JSFinalizationRegistryJobHook,
+        opaque: *mut ::std::os::raw::c_void,
+    );
+}
 pub type JSGCRootsHook = ::std::option::Option<
     unsafe extern "C" fn(
         rt: *mut JSRuntime,

@@ -376,10 +376,29 @@ pub(crate) unsafe fn SetJobQueue(cx: *mut root::JSContext, queue: *mut root::JS:
     if queue.is_null() {
         q::JS_SetEnqueueJobHook(cx.rt, None, opaque);
         q::JS_SetHostMakeJobCallbackHook(cx.rt, None, opaque);
+        q::JS_SetFinalizationRegistryJobHook(cx.rt, None, ptr::null_mut());
     } else {
         q::JS_SetEnqueueJobHook(cx.rt, Some(enqueue_job), opaque);
         q::JS_SetHostMakeJobCallbackHook(cx.rt, Some(make_job_callback), opaque);
+        q::JS_SetFinalizationRegistryJobHook(
+            cx.rt,
+            Some(drop_finalization_registry_job),
+            ptr::null_mut(),
+        );
     }
+}
+
+/// With the embedder's queue installed nothing runs QuickJS's own job list, so a
+/// FinalizationRegistry cleanup job queued there would never run and would keep its realm alive.
+/// The job is dropped instead: like SpiderMonkey without a host cleanup callback, which Servo does
+/// not set, cleanup callbacks never run. QuickJS has already removed the registry's record.
+unsafe extern "C" fn drop_finalization_registry_job(
+    _rt: *mut q::JSRuntime,
+    _realm: *mut q::JSContext,
+    _cb: q::JSValue,
+    _held_val: q::JSValue,
+    _opaque: *mut c_void,
+) {
 }
 
 pub(crate) unsafe fn GetJobQueue(cx: *mut root::JSContext) -> *mut root::JS::JobQueue {

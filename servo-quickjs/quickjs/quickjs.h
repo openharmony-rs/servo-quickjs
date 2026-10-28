@@ -1153,6 +1153,16 @@ uint32_t JS_CountObjectsByClass(JSRuntime *rt, uint32_t *counts, uint32_t len);
 #define JS_GC_PASS_DECREF 1
 #define JS_GC_PASS_SCAN   2
 int JS_GetGCPass(JSRuntime *rt, uint32_t *gc_number);
+/* Servo (patch Q42): called instead of queuing a FinalizationRegistry cleanup
+   job on the runtime's job list, during a GC: it must not allocate or run JS.
+   'realm', 'cb' and 'held_val' are borrowed: dup them (JS_DupContext,
+   JS_DupValueRT) to keep them. */
+typedef void JSFinalizationRegistryJobHook(JSRuntime *rt, JSContext *realm,
+                                           JSValueConst cb, JSValueConst held_val,
+                                           void *opaque);
+void JS_SetFinalizationRegistryJobHook(JSRuntime *rt,
+                                       JSFinalizationRegistryJobHook *hook,
+                                       void *opaque);
 /* Servo (debugging): called during each GC, before anything is freed, for every GC thing
    that is referenced from outside the GC heap ('ref_count' external references): the roots
    of the collection. 'gc_obj_type' is 0 for a JSObject ('ptr'), 5 for a JSContext. A last

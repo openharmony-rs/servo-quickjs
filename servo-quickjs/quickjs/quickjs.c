@@ -411,6 +411,9 @@ struct JSRuntime {
     JSDynamicImportHook *dynamic_import_hook;
     void *dynamic_import_opaque;
     JSScriptPrivateFinalizer *script_private_finalizer;
+    /* Servo: takes the FinalizationRegistry cleanup jobs (patch Q42) */
+    JSFinalizationRegistryJobHook *finrec_job_hook;
+    void *finrec_job_opaque;
     JSGCRootsHook *gc_roots_hook; /* Servo (debugging) */
     void *gc_roots_opaque;
     JSGCChildVisitor *gc_child_visitor;
@@ -62637,8 +62640,14 @@ static void finrec_delete_weakref(JSRuntime *rt, JSWeakRefHeader *wh)
             JSValueConst args[2];
             args[0] = frd->cb;
             args[1] = fre->held_val;
-            /* no exception is raised to avoid recursing into the GC */
-            JS_EnqueueJob2(frd->realm, js_finrec_job, 2, args, TRUE, JS_UNDEFINED, JS_UNDEFINED);
+            if (rt->finrec_job_hook) {
+                /* Servo: the embedder takes the job (patch Q42) */
+                rt->finrec_job_hook(rt, frd->realm, args[0], args[1],
+                                    rt->finrec_job_opaque);
+            } else {
+                /* no exception is raised to avoid recursing into the GC */
+                JS_EnqueueJob2(frd->realm, js_finrec_job, 2, args, TRUE, JS_UNDEFINED, JS_UNDEFINED);
+            }
                 
             js_weakref_free(rt, fre->target);
             js_weakref_free(rt, fre->token);
@@ -63190,6 +63199,15 @@ int JS_GetGCPass(JSRuntime *rt, uint32_t *gc_number)
     if (gc_number)
         *gc_number = rt->gc_number;
     return rt->gc_pass;
+}
+
+/* Servo (patch Q42) */
+void JS_SetFinalizationRegistryJobHook(JSRuntime *rt,
+                                       JSFinalizationRegistryJobHook *hook,
+                                       void *opaque)
+{
+    rt->finrec_job_hook = hook;
+    rt->finrec_job_opaque = opaque;
 }
 
 /* Servo (debugging): live objects per class */
