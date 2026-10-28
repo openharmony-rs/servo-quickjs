@@ -222,9 +222,10 @@ As SpiderMonkey does for web compatibility, formatted dates and times have U+002
 | Q40 | `ArrayBuffer` and `SharedArrayBuffer` convert the `maxByteLength` option with ToIndex, as the spec says, instead of ToInt64, which wrapped modulo 2⁶⁴: `2 ** 64 + 4096` gave 4096 and `Infinity` 0 instead of a RangeError | small |
 | Q41 | `JS_GetGCPass`: the cycle collector pass in progress (decrement or scan) and the collection's number, so that the trace hooks of objects that share Rust data mark it once per pass | small |
 | Q42 | `JS_SetFinalizationRegistryJobHook`: the embedder takes FinalizationRegistry cleanup jobs instead of the runtime's job list | small |
+| Q43 | `JS_AddAssociatedMemory`/`JS_RemoveAssociatedMemory`: memory the embedder allocated for objects, with a GC trigger of its own like SpiderMonkey's malloc threshold | small |
 
 ## Not supported
 
 `Debugger` / devtools, WebAssembly, SharedArrayBuffer (already disabled in Servo), off-thread compilation, JIT options, and GC zeal.
 Explicit resource management: QuickJS has no `Symbol.dispose` and `Symbol.asyncDispose`, so `GetWellKnownSymbol` returns null for them.
-`JS_SetGCParameter` maps to `JS_SetGCThreshold` / `JS_SetMemoryLimit` where it makes sense; everything else is a no-op.
+`JS_SetGCParameter` is a no-op. `AddAssociatedMemory`/`RemoveAssociatedMemory` have a GC trigger of their own (patch Q43), like SpiderMonkey's malloc threshold with its default parameters: a collection runs when the reported memory exceeds what the last one left, or 38 MiB, times 1.5, or up to 3 when collections come less than a second apart (SpiderMonkey's high-frequency heap growth). Servo reports the size of every DOM object and canvas bitmap, which a collection frees with their reflectors.

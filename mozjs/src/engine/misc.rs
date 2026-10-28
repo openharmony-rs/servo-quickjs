@@ -350,12 +350,18 @@ pub(crate) unsafe fn InitializeMemoryReporter(wtm: crate::sys::glue::WantToMeasu
     let _ = wtm;
 }
 
+/// Memory the embedder allocated for `obj` has a GC trigger of its own (patch Q43), like
+/// SpiderMonkey's malloc threshold: Servo reports the size of every DOM object and canvas bitmap,
+/// which a collection frees with their reflectors.
 pub(crate) unsafe fn AddAssociatedMemory(
     obj: *mut root::JSObject,
     nbytes: usize,
     use_: root::JS::MemoryUse,
 ) {
-    let _ = (obj, nbytes, use_);
+    let _ = (obj, use_);
+    if let Some(cx) = super::try_current() {
+        q::JS_AddAssociatedMemory(cx.rt, nbytes);
+    }
 }
 
 pub(crate) unsafe fn RemoveAssociatedMemory(
@@ -363,7 +369,10 @@ pub(crate) unsafe fn RemoveAssociatedMemory(
     nbytes: usize,
     use_: root::JS::MemoryUse,
 ) {
-    let _ = (obj, nbytes, use_);
+    let _ = (obj, use_);
+    if let Some(cx) = super::try_current() {
+        q::JS_RemoveAssociatedMemory(cx.rt, nbytes);
+    }
 }
 
 // Engine options without a QuickJS counterpart (no JIT, no WebAssembly, no helper threads).

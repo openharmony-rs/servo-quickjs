@@ -1871,6 +1871,12 @@ unsafe extern "C" {
         opaque: *mut ::std::os::raw::c_void,
     );
 }
+unsafe extern "C" {
+    pub fn JS_AddAssociatedMemory(rt: *mut JSRuntime, size: usize);
+}
+unsafe extern "C" {
+    pub fn JS_RemoveAssociatedMemory(rt: *mut JSRuntime, size: usize);
+}
 pub type JSGCRootsHook = ::std::option::Option<
     unsafe extern "C" fn(
         rt: *mut JSRuntime,

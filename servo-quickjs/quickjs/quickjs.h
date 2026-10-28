@@ -1163,6 +1163,12 @@ typedef void JSFinalizationRegistryJobHook(JSRuntime *rt, JSContext *realm,
 void JS_SetFinalizationRegistryJobHook(JSRuntime *rt,
                                        JSFinalizationRegistryJobHook *hook,
                                        void *opaque);
+/* Servo (patch Q43): memory the embedder allocated for objects, which a GC
+   may free. Like SpiderMonkey's malloc counter it has a GC trigger of its own:
+   a GC runs when it exceeds what the last GC left, or 38 MiB, times 1.5, or
+   up to 3 when GCs come less than a second apart. */
+void JS_AddAssociatedMemory(JSRuntime *rt, size_t size);
+void JS_RemoveAssociatedMemory(JSRuntime *rt, size_t size);
 /* Servo (debugging): called during each GC, before anything is freed, for every GC thing
    that is referenced from outside the GC heap ('ref_count' external references): the roots
    of the collection. 'gc_obj_type' is 0 for a JSObject ('ptr'), 5 for a JSContext. A last
