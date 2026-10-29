@@ -9,6 +9,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::ffi::{c_void, CStr, CString};
+use std::process::Command;
 use std::ptr::{self, NonNull};
 use std::sync::LazyLock;
 
@@ -618,6 +619,158 @@ fn forwarding_proxy_handler() {
             "Object.preventExtensions(p); !Object.isExtensible(t)",
         );
     });
+}
+
+thread_local! {
+    static CROSS_FINALIZED: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Clears slot 2 of the proxy that slot 1 holds, as a Servo ObservableArray owner clears its
+/// array's owner slot from its finalizer.
+unsafe extern "C" fn clear_peer_slot(_gcx: *mut GCContext, proxy: *mut JSObject) {
+    let mut peer = UndefinedValue();
+    GetProxyReservedSlot(proxy, 1, &mut peer);
+    if peer.is_object() {
+        SetProxyReservedSlot(peer.to_object(), 2, &UndefinedValue());
+        CROSS_FINALIZED.with(|c| c.set(c.get() + 1));
+    }
+}
+
+/// Reads slot 2 of the proxy that slot 1 holds.
+unsafe extern "C" fn read_peer_slot(_gcx: *mut GCContext, proxy: *mut JSObject) {
+    let mut peer = UndefinedValue();
+    GetProxyReservedSlot(proxy, 1, &mut peer);
+    if peer.is_object() {
+        let mut value = UndefinedValue();
+        GetProxyReservedSlot(peer.to_object(), 2, &mut value);
+    }
+}
+
+/// Runs `f` in a realm after making a garbage cycle of two proxies with the finalizer `finalize`.
+fn with_proxy_cycle(
+    finalize: unsafe extern "C" fn(*mut GCContext, *mut JSObject),
+    f: impl FnOnce(&mut JSContext),
+) {
+    with_runtime(|cx| unsafe {
+        rooted!(&in(cx) let global = new_global(cx, &SIMPLE_GLOBAL_CLASS, &RealmOptions::default(), ptr::null_mut()));
+        let mut realm = AutoRealm::new_from_handle(cx, global.handle());
+        let cx = &mut *realm;
+        let traps = ProxyTraps {
+            finalize: Some(finalize),
+            ..dom_traps()
+        };
+        let handler = CreateProxyHandler(&traps, ptr::null());
+        {
+            let undefined = UndefinedValue();
+            let new = |cx: &mut JSContext| {
+                NewProxyObject(
+                    cx.raw_cx(),
+                    handler,
+                    Handle::from_marked_location(&undefined),
+                    ptr::null_mut(),
+                    &PROXY_CLASS,
+                    false,
+                )
+            };
+            rooted!(&in(cx) let a = new(cx));
+            rooted!(&in(cx) let b = new(cx));
+            SetProxyReservedSlot(a.get(), 1, &ObjectValue(b.get()));
+            SetProxyReservedSlot(b.get(), 1, &ObjectValue(a.get()));
+            SetProxyReservedSlot(a.get(), 2, &Int32Value(1));
+            SetProxyReservedSlot(b.get(), 2, &Int32Value(2));
+        }
+        f(cx);
+    });
+}
+
+#[test]
+fn finalizers_write_slots_of_finalized_proxies() {
+    CROSS_FINALIZED.with(|c| c.set(0));
+    with_proxy_cycle(clear_peer_slot, |cx| unsafe {
+        // Both die in one collection: the second finalizer writes to the first, finalized, proxy.
+        mozjs::quickjs::drain_autorelease_pool();
+        JS_GC(cx, GCReason::API);
+        assert_eq!(CROSS_FINALIZED.with(Cell::get), 2);
+    });
+}
+
+#[test]
+fn finalizers_write_slots_of_finalized_proxies_at_teardown() {
+    CROSS_FINALIZED.with(|c| c.set(0));
+    with_proxy_cycle(clear_peer_slot, |_| {});
+    assert_eq!(CROSS_FINALIZED.with(Cell::get), 2);
+}
+
+/// Run by `finalizers_cannot_read_slots_of_finalized_proxies`: the second finalizer aborts.
+#[test]
+#[ignore = "run by finalizers_cannot_read_slots_of_finalized_proxies, it aborts"]
+fn finalizer_reads_slot_of_finalized_proxy() {
+    with_proxy_cycle(read_peer_slot, |cx| unsafe {
+        mozjs::quickjs::drain_autorelease_pool();
+        JS_GC(cx, GCReason::API);
+    });
+}
+
+/// Runs the ignored test `child`, which must abort with `message`.
+fn assert_aborts(child: &str, message: &str) {
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", child, "--ignored", "--nocapture"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(stderr.contains(message), "{stderr}");
+}
+
+#[test]
+fn finalizers_cannot_read_slots_of_finalized_proxies() {
+    assert_aborts(
+        "finalizer_reads_slot_of_finalized_proxy",
+        "GetProxyReservedSlot on a non-proxy",
+    );
+}
+
+/// Run by `writes_to_finalized_proxies_outside_a_collection_abort`. A WeakRef keeps a finalized
+/// object's structure after the collection, with class id 0.
+#[test]
+#[ignore = "run by writes_to_finalized_proxies_outside_a_collection_abort, it aborts"]
+fn writes_to_finalized_proxy_outside_a_collection() {
+    with_runtime(|cx| unsafe {
+        rooted!(&in(cx) let global = new_global(cx, &SIMPLE_GLOBAL_CLASS, &RealmOptions::default(), ptr::null_mut()));
+        let mut realm = AutoRealm::new_from_handle(cx, global.handle());
+        let cx = &mut *realm;
+        let handler = CreateProxyHandler(&ProxyTraps::default(), ptr::null());
+        let proxy = {
+            let undefined = UndefinedValue();
+            rooted!(&in(cx) let proxy = NewProxyObject(
+                cx.raw_cx(),
+                handler,
+                Handle::from_marked_location(&undefined),
+                ptr::null_mut(),
+                &PROXY_CLASS,
+                false,
+            ));
+            set_global(cx, global.handle(), c"p", ObjectValue(proxy.get()));
+            eval(
+                cx,
+                global.handle(),
+                "globalThis.r = new WeakRef(p); delete globalThis.p; 0",
+            );
+            proxy.get()
+        };
+        mozjs::quickjs::drain_autorelease_pool();
+        JS_GC(cx, GCReason::API);
+        eval_true(cx, global.handle(), "r.deref() === undefined");
+        SetProxyReservedSlot(proxy, 2, &UndefinedValue());
+    });
+}
+
+#[test]
+fn writes_to_finalized_proxies_outside_a_collection_abort() {
+    assert_aborts(
+        "writes_to_finalized_proxy_outside_a_collection",
+        "SetProxyReservedSlot on a non-proxy",
+    );
 }
 
 #[test]

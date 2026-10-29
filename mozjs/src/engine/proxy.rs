@@ -1180,6 +1180,15 @@ pub(crate) unsafe fn SetProxyPrivate(obj: *mut root::JSObject, expando: *const r
     );
 }
 
+/// Whether the running cycle collection already finalized `obj`, which QuickJS gave class id 0.
+/// It finalizes garbage in any order, and Servo's ObservableArray owners clear the owner slot of
+/// their array's proxy from their finalizer. The owner's reference keeps the proxy's structure
+/// until the collection ends, and the proxy is garbage too, so nothing can read the slot again.
+unsafe fn finalized_in_collection(obj: *mut root::JSObject) -> bool {
+    q::JS_GetClassID(obj_val(obj)) == 0
+        && super::try_current().is_some_and(|cx| q::JS_IsCollectingCycles(cx.rt) != 0)
+}
+
 pub(crate) unsafe fn GetProxyReservedSlot(
     obj: *mut root::JSObject,
     slot: u32,
@@ -1198,6 +1207,9 @@ pub(crate) unsafe fn SetProxyReservedSlot(
     slot: u32,
     val: *const root::JS::Value,
 ) {
+    if finalized_in_collection(obj) {
+        return;
+    }
     let data = proxy_data(obj).expect("SetProxyReservedSlot on a non-proxy");
     set_counted(&data.slots[slot as usize], *val);
 }

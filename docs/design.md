@@ -43,6 +43,7 @@ Rule: anything that can outlive the current task holds a reference count; anythi
 - So reflectors are registered in a per-thread map (Rust address → JS object) when reflected, and unregistered by the finalize hooks before the Rust struct drops. The hooks run the drop with a `FINALIZING` flag set.
 - While finalizing, `Dom::drop` looks up the map: a missing entry means the target died in the same collection, and there is nothing to release.
 - Outside finalization the target is alive (the `Dom` holds a count), so its reflector is read directly.
+- Finalizers must not reach the other objects of a cycle, with one exception. Servo's ObservableArray owners clear the owner slot of their array's proxy from their finalizer, so that a proxy that outlives its owner has no dangling pointer to it. When the proxy is garbage too and was finalized first, `SetProxyReservedSlot` ignores the write: the owner's reference keeps the proxy's structure until the collection ends, and nothing can read the slot again. Reads of such a proxy, and writes outside a cycle collection, still panic.
 - `JS::RuntimeHeapState` is `MajorCollecting` while the cycle collector frees a garbage cycle (Q23), and `Idle` otherwise, also while an object whose count dropped to zero is finalized: its references are alive. Servo's `during_gc_collection()` guards (e.g. `LoadBlocker::drop`) then skip work on objects that die in the same cycle; without it a `Trusted<Document>` was made for a document of the cycle, and swept after it was freed.
 
 Why the pool is safe:
