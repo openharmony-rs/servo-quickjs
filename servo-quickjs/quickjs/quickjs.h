@@ -530,6 +530,9 @@ typedef struct JSClassExoticMethods {
     int (*is_extensible)(JSContext *ctx, JSValueConst obj);
     /* return < 0 if exception or TRUE/FALSE */
     int (*prevent_extensions)(JSContext *ctx, JSValueConst obj);
+    /* Servo: ECMAScript IsArray of the object, e.g. for the embedder's proxies of
+       arrays (Q44). Return < 0 if exception or TRUE/FALSE */
+    int (*is_array)(JSContext *ctx, JSValueConst obj);
 } JSClassExoticMethods;
 
 typedef void JSClassFinalizer(JSRuntime *rt, JSValue val);

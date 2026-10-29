@@ -14930,6 +14930,17 @@ int JS_IsArray(JSContext *ctx, JSValueConst val)
         return -1;
     if (JS_VALUE_GET_TAG(val) == JS_TAG_OBJECT) {
         JSObject *p = JS_VALUE_GET_OBJ(val);
+        /* Servo: the class's is_array exotic method answers (Q44) */
+        if (p->is_exotic && p->class_id != JS_CLASS_ARRAY) {
+            const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+            if (em && em->is_array) {
+                if (js_check_stack_overflow(ctx->rt, 0)) {
+                    JS_ThrowStackOverflow(ctx);
+                    return -1;
+                }
+                return em->is_array(ctx, val);
+            }
+        }
         return p->class_id == JS_CLASS_ARRAY;
     } else {
         return FALSE;

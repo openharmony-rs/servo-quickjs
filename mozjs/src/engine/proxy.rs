@@ -762,6 +762,7 @@ static STATIC_PROTO_EXOTIC: q::JSClassExoticMethods = q::JSClassExoticMethods {
     set_prototype: None,
     is_extensible: Some(proxy_is_extensible),
     prevent_extensions: Some(proxy_prevent_extensions),
+    is_array: Some(proxy_is_array),
 };
 
 static LAZY_PROTO_EXOTIC: q::JSClassExoticMethods = q::JSClassExoticMethods {
@@ -1032,6 +1033,19 @@ unsafe extern "C" fn proxy_prevent_extensions(ctx: *mut q::JSContext, obj: q::JS
         return t.failed();
     }
     op_ok(&result) as c_int
+}
+
+/// As in SpiderMonkey, a proxy is an array if its handler forwards and its target is one.
+unsafe extern "C" fn proxy_is_array(ctx: *mut q::JSContext, obj: q::JSValue) -> c_int {
+    let t = Trap::new(ctx, obj);
+    if t.proxy.forwards() {
+        return q::JS_IsArray(ctx, obj_val(t.proxy.target()));
+    }
+    if t.proxy.kind() == Kind::Dead {
+        t.proxy.unsupported("isArray");
+        return t.failed();
+    }
+    0
 }
 
 // The proxy API.
@@ -1839,6 +1853,7 @@ static RESOLVE_EXOTIC: q::JSClassExoticMethods = q::JSClassExoticMethods {
     set_prototype: None,
     is_extensible: None,
     prevent_extensions: None,
+    is_array: None,
 };
 
 /// Exotic methods for SpiderMonkey classes with resolve or enumerate hooks (globals), or null.

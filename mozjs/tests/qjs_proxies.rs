@@ -30,13 +30,13 @@ use mozjs::jsapi::{
     JSContext as RawJSContext, JSErrNum, JSObject, JSPrincipals, JSTracer, JS_DefinePropertyById,
     JS_DeletePropertyById, JS_DropPrincipals, JS_GetOwnPropertyDescriptorById,
     JS_GlobalObjectTraceHook, JS_HasOwnPropertyById, JS_HoldPrincipals,
-    JS_InitDestroyPrincipalsCallback, JS_IterateCompartments, JS_NewObjectWithGivenProto,
-    JS_SetReservedSlot, JS_TransplantObject, JS_WrapObject, MutableHandle, MutableHandleIdVector,
-    MutableHandleValue as RawMutableHandleValue, ObjectOpResult, OnNewGlobalHookOption,
-    PropertyDescriptor, PropertyKey, SetWindowProxy, SetWindowProxyClass, ToWindowIfWindowProxy,
-    ToWindowProxyIfWindowSlow, JSCLASS_GLOBAL_SLOT_COUNT, JSCLASS_IS_GLOBAL, JSCLASS_IS_PROXY,
-    JSCLASS_RESERVED_SLOTS_MASK, JSCLASS_RESERVED_SLOTS_SHIFT, JSITER_HIDDEN, JSITER_OWNONLY,
-    JSITER_SYMBOLS, JSPROP_ENUMERATE,
+    JS_InitDestroyPrincipalsCallback, JS_IterateCompartments, JS_NewDeadWrapper,
+    JS_NewObjectWithGivenProto, JS_SetReservedSlot, JS_TransplantObject, JS_WrapObject,
+    MutableHandle, MutableHandleIdVector, MutableHandleValue as RawMutableHandleValue,
+    ObjectOpResult, OnNewGlobalHookOption, PropertyDescriptor, PropertyKey, SetWindowProxy,
+    SetWindowProxyClass, ToWindowIfWindowProxy, ToWindowProxyIfWindowSlow,
+    JSCLASS_GLOBAL_SLOT_COUNT, JSCLASS_IS_GLOBAL, JSCLASS_IS_PROXY, JSCLASS_RESERVED_SLOTS_MASK,
+    JSCLASS_RESERVED_SLOTS_SHIFT, JSITER_HIDDEN, JSITER_OWNONLY, JSITER_SYMBOLS, JSPROP_ENUMERATE,
 };
 use mozjs::jsval::{Int32Value, JSVal, ObjectValue, PrivateValue, UndefinedValue};
 use mozjs::realm::AutoRealm;
@@ -617,6 +617,120 @@ fn forwarding_proxy_handler() {
             cx,
             global.handle(),
             "Object.preventExtensions(p); !Object.isExtensible(t)",
+        );
+    });
+}
+
+#[test]
+fn is_array_of_proxies() {
+    with_runtime(|cx| unsafe {
+        rooted!(&in(cx) let global = new_global(cx, &SIMPLE_GLOBAL_CLASS, &RealmOptions::default(), ptr::null_mut()));
+        let mut realm = AutoRealm::new_from_handle(cx, global.handle());
+        let cx = &mut *realm;
+        let traps = ProxyTraps::default();
+        let extra = &EXTRA as *const u8 as *const c_void;
+        let handlers = [
+            (c"f", CreateForwardingProxyHandler(&traps, extra)),
+            (c"w", CreateWrapperProxyHandler(&traps)),
+            (c"b", CreateProxyHandler(&traps, extra)),
+        ];
+        let targets = [
+            (c"A", "[1, 2, 3]"),
+            (c"P", "new Proxy([1, 2, 3], {})"),
+            (c"O", "({ 0: 1, 1: 2, 2: 3, length: 3 })"),
+            (c"X", "globalThis.X = class extends Array {}; X.of(1, 2, 3)"),
+            (
+                c"R",
+                "const r = Proxy.revocable([], {}); r.revoke(); r.proxy",
+            ),
+        ];
+        for (target_name, src) in targets {
+            rooted!(&in(cx) let target = eval(cx, global.handle(), src));
+            for (handler_name, handler) in handlers {
+                let proxy = NewProxyObject(
+                    cx.raw_cx(),
+                    handler,
+                    target.handle().into(),
+                    ptr::null_mut(),
+                    ptr::null(),
+                    true,
+                );
+                assert!(!proxy.is_null());
+                let mut name = handler_name.to_bytes().to_vec();
+                name.extend_from_slice(target_name.to_bytes());
+                set_global(
+                    cx,
+                    global.handle(),
+                    &CString::new(name).unwrap(),
+                    ObjectValue(proxy),
+                );
+            }
+        }
+
+        // As in SpiderMonkey, forwarding handlers and wrappers ask their target, even through a
+        // JS Proxy either way, and other handlers are not arrays.
+        eval_true(
+            cx,
+            global.handle(),
+            "[fA, fP, wA, wP, new Proxy(fA, {})].every(Array.isArray)",
+        );
+        eval_true(
+            cx,
+            global.handle(),
+            "![fO, wO, bA, bP, bO].some(Array.isArray)",
+        );
+
+        // ECMAScript's other IsArray users.
+        eval_true(
+            cx,
+            global.handle(),
+            "Object.prototype.toString.call(fA) === '[object Array]' && \
+             Object.prototype.toString.call(fO) === '[object Object]'",
+        );
+        eval_true(
+            cx,
+            global.handle(),
+            "[0].concat(fA).length === 4 && [0].concat(wA).length === 4 && \
+             [0].concat(fO).length === 2",
+        );
+        eval_true(
+            cx,
+            global.handle(),
+            "JSON.stringify({ a: fA }) === '{\"a\":[1,2,3]}' && JSON.stringify([[fA]].flat(2)) === '[1,2,3]'",
+        );
+        eval_true(
+            cx,
+            global.handle(),
+            "JSON.stringify({ 1: 'a', x: 'y' }, fA) === '{\"1\":\"a\"}'",
+        );
+        eval_true(
+            cx,
+            global.handle(),
+            "Array.prototype.map.call(fX, x => x) instanceof X",
+        );
+
+        // As in SpiderMonkey, IsArray throws through a revoked JS Proxy, for a proxy that is its
+        // own target and for a dead wrapper.
+        eval_true(
+            cx,
+            global.handle(),
+            "!Array.isArray(bR) && \
+             (() => { try { Array.isArray(fR); return false } catch (e) { return e instanceof TypeError } })()",
+        );
+        rooted!(&in(cx) let own = eval(cx, global.handle(), "fO"));
+        SetProxyPrivate(own.get().to_object(), &own.get());
+        eval_true(
+            cx,
+            global.handle(),
+            "try { Array.isArray(fO); false } catch (e) { String(e) === 'InternalError: stack overflow' }",
+        );
+        let dead = JS_NewDeadWrapper(cx.raw_cx(), ptr::null_mut());
+        assert!(!dead.is_null());
+        set_global(cx, global.handle(), c"d", ObjectValue(dead));
+        eval_true(
+            cx,
+            global.handle(),
+            "try { Array.isArray(d); false } catch (e) { e instanceof TypeError }",
         );
     });
 }

@@ -779,6 +779,9 @@ pub struct JSClassExoticMethods {
     pub prevent_extensions: ::std::option::Option<
         unsafe extern "C" fn(ctx: *mut JSContext, obj: JSValue) -> ::std::os::raw::c_int,
     >,
+    pub is_array: ::std::option::Option<
+        unsafe extern "C" fn(ctx: *mut JSContext, obj: JSValue) -> ::std::os::raw::c_int,
+    >,
 }
 pub type JSClassFinalizer =
     ::std::option::Option<unsafe extern "C" fn(rt: *mut JSRuntime, val: JSValue)>;
