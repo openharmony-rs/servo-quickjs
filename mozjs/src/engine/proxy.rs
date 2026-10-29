@@ -126,6 +126,9 @@ unsafe fn throw_or_false(
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     /// `CreateProxyHandler`: missing traps behave as in `js::BaseProxyHandler`.
+    Base,
+    /// `CreateForwardingProxyHandler`: missing traps forward to the target, as in
+    /// `js::ForwardingProxyHandler`.
     Forwarding,
     /// `CreateWrapperProxyHandler`: missing traps forward to the target.
     Wrapper,
@@ -133,7 +136,8 @@ enum Kind {
     Dead,
 }
 
-/// What `CreateProxyHandler` and `CreateWrapperProxyHandler` return.
+/// What `CreateProxyHandler`, `CreateForwardingProxyHandler` and `CreateWrapperProxyHandler`
+/// return.
 pub(crate) struct ProxyHandler {
     traps: glue::ProxyTraps,
     extra: *const c_void,
@@ -155,7 +159,8 @@ impl ProxyHandler {
 static DEAD_HANDLER: ProxyHandler = ProxyHandler::empty(Kind::Dead);
 static PLAIN_WRAPPER_HANDLER: ProxyHandler = ProxyHandler::empty(Kind::Wrapper);
 
-/// The family of `CreateProxyHandler` handlers; only its address matters.
+/// The family of `CreateProxyHandler` handlers; only its address matters. `IsProxyHandlerFamily`
+/// also holds for `CreateForwardingProxyHandler` handlers, as in mozjs.
 static HANDLER_FAMILY: u8 = 0;
 
 const fn proxy_class_def(name: &'static std::ffi::CStr, slots: u32) -> root::JSClass {
@@ -326,6 +331,11 @@ impl ProxyRef {
         unsafe { (*self.handler).kind }
     }
 
+    /// Whether missing traps forward to the target.
+    fn forwards(&self) -> bool {
+        matches!(self.kind(), Kind::Forwarding | Kind::Wrapper)
+    }
+
     fn proxy(&self) -> root::JS::HandleObject {
         handle(&self.proxy)
     }
@@ -361,7 +371,7 @@ impl ProxyRef {
         *is_none = true;
         match self.traps().getOwnPropertyDescriptor {
             Some(trap) => trap(self.cx, self.proxy(), handle(id), handle_mut(desc), is_none),
-            None if self.kind() == Kind::Wrapper => {
+            None if self.forwards() => {
                 let target = self.target();
                 super::JS_GetOwnPropertyDescriptorById(
                     self.cx,
@@ -379,7 +389,7 @@ impl ProxyRef {
         if let Some(trap) = self.traps().hasOwn {
             return trap(self.cx, self.proxy(), handle(id), bp);
         }
-        if self.kind() == Kind::Wrapper {
+        if self.forwards() {
             let target = self.target();
             return super::JS_HasOwnPropertyById(self.cx, handle(&target), handle(id), bp);
         }
@@ -398,7 +408,7 @@ impl ProxyRef {
         }
         match self.traps().getPrototype {
             Some(trap) => trap(self.cx, self.proxy(), handle_mut(proto)),
-            None if self.kind() == Kind::Wrapper => {
+            None if self.forwards() => {
                 let target = self.target();
                 super::JS_GetPrototype(self.cx, handle(&target), handle_mut(proto))
             }
@@ -409,7 +419,7 @@ impl ProxyRef {
     unsafe fn is_extensible(&self, extensible: &mut bool) -> bool {
         match self.traps().isExtensible {
             Some(trap) => trap(self.cx, self.proxy(), extensible),
-            None if self.kind() == Kind::Wrapper => {
+            None if self.forwards() => {
                 let r = q::JS_IsExtensible(self.qctx(), obj_val(self.target()));
                 *extensible = r > 0;
                 r >= 0
@@ -422,7 +432,7 @@ impl ProxyRef {
         if let Some(trap) = self.traps().has {
             return trap(self.cx, self.proxy(), handle(id), bp);
         }
-        if self.kind() == Kind::Wrapper {
+        if self.forwards() {
             let target = self.target();
             return super::JS_HasPropertyById(self.cx, handle(&target), handle(id), bp);
         }
@@ -453,7 +463,7 @@ impl ProxyRef {
                 handle_mut(vp),
             );
         }
-        if self.kind() == Kind::Wrapper {
+        if self.forwards() {
             let target = self.target();
             return super::JS_ForwardGetPropertyTo(
                 self.cx,
@@ -520,7 +530,7 @@ impl ProxyRef {
                 result,
             );
         }
-        if self.kind() == Kind::Wrapper {
+        if self.forwards() {
             let target = self.target();
             return super::JS_ForwardSetPropertyTo(
                 self.cx,
@@ -561,7 +571,7 @@ impl ProxyRef {
     ) -> bool {
         match self.traps().defineProperty {
             Some(trap) => trap(self.cx, self.proxy(), handle(id), handle(desc), result),
-            None if self.kind() == Kind::Wrapper => {
+            None if self.forwards() => {
                 let target = self.target();
                 super::JS_DefinePropertyById(
                     self.cx,
@@ -578,7 +588,7 @@ impl ProxyRef {
     unsafe fn delete(&self, id: &root::jsid, result: &mut root::JS::ObjectOpResult) -> bool {
         match self.traps().delete_ {
             Some(trap) => trap(self.cx, self.proxy(), handle(id), result),
-            None if self.kind() == Kind::Wrapper => {
+            None if self.forwards() => {
                 let target = self.target();
                 super::JS_DeletePropertyById(self.cx, handle(&target), handle(id), result)
             }
@@ -589,7 +599,7 @@ impl ProxyRef {
     unsafe fn own_property_keys(&self, props: root::JS::MutableHandleIdVector) -> bool {
         match self.traps().ownPropertyKeys {
             Some(trap) => trap(self.cx, self.proxy(), props),
-            None if self.kind() == Kind::Wrapper => {
+            None if self.forwards() => {
                 let target = self.target();
                 let flags = root::JSITER_OWNONLY | root::JSITER_HIDDEN | root::JSITER_SYMBOLS;
                 super::GetPropertyKeys(self.cx, handle(&target), flags as c_uint, props)
@@ -609,7 +619,7 @@ impl ProxyRef {
             }
             return op_ok(&result) as c_int;
         }
-        if self.kind() == Kind::Wrapper {
+        if self.forwards() {
             return q::JS_SetPrototype(ctx, obj_val(self.target()), obj_or_null_val(proto));
         }
         throw_type_error(ctx, "can't set prototype of this object");
@@ -898,7 +908,7 @@ unsafe fn unshadowed(ctx: *mut q::JSContext, obj: q::JSValue, atom: q::JSAtom) -
     let handler = &*data.handler;
     // Generated DOM proxies have their DOM class as extra; the window's named properties object
     // has none and different rules.
-    if handler.kind != Kind::Forwarding || handler.extra.is_null() {
+    if handler.kind != Kind::Base || handler.extra.is_null() {
         return Unshadowed::No;
     }
     let proto = q::JS_GetObjectShapeProto(obj.ptr());
@@ -1013,7 +1023,7 @@ unsafe extern "C" fn proxy_prevent_extensions(ctx: *mut q::JSContext, obj: q::JS
     let mut result = new_op_result();
     let ok = match t.proxy.traps().preventExtensions {
         Some(trap) => trap(t.proxy.cx, t.proxy.proxy(), &mut result),
-        None if t.proxy.kind() == Kind::Wrapper => {
+        None if t.proxy.forwards() => {
             return q::JS_PreventExtensions(ctx, obj_val(t.proxy.target()));
         }
         None => t.proxy.unsupported("preventExtensions"),
@@ -1027,6 +1037,18 @@ unsafe extern "C" fn proxy_prevent_extensions(ctx: *mut q::JSContext, obj: q::JS
 // The proxy API.
 
 pub(crate) unsafe fn CreateProxyHandler(
+    aTraps: *const glue::ProxyTraps,
+    aExtra: *const ::std::os::raw::c_void,
+) -> *const ::std::os::raw::c_void {
+    let handler = ProxyHandler {
+        traps: *aTraps,
+        extra: aExtra,
+        kind: Kind::Base,
+    };
+    Box::into_raw(Box::new(handler)) as *const c_void
+}
+
+pub(crate) unsafe fn CreateForwardingProxyHandler(
     aTraps: *const glue::ProxyTraps,
     aExtra: *const ::std::os::raw::c_void,
 ) -> *const ::std::os::raw::c_void {
@@ -1120,7 +1142,7 @@ pub(crate) unsafe fn GetProxyHandlerExtra(
     obj: *mut root::JSObject,
 ) -> *const ::std::os::raw::c_void {
     let handler = proxy_handler(obj).expect("GetProxyHandlerExtra on a non-proxy");
-    assert!(handler.kind == Kind::Forwarding);
+    assert!(matches!(handler.kind, Kind::Base | Kind::Forwarding));
     handler.extra
 }
 
@@ -1129,7 +1151,7 @@ pub(crate) unsafe fn GetProxyHandlerFamily() -> *const ::std::os::raw::c_void {
 }
 
 pub(crate) unsafe fn IsProxyHandlerFamily(obj: *mut root::JSObject) -> bool {
-    proxy_handler(obj).is_some_and(|handler| handler.kind == Kind::Forwarding)
+    proxy_handler(obj).is_some_and(|handler| matches!(handler.kind, Kind::Base | Kind::Forwarding))
 }
 
 /// Stores `v` (counted) in `slot`, and frees the old value: that can run finalizers that read this

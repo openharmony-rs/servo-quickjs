@@ -15,11 +15,12 @@ use std::sync::LazyLock;
 use mozjs::context::JSContext;
 use mozjs::conversions::jsstr_to_string;
 use mozjs::glue::{
-    CreateProxyHandler, CreateRustJSPrincipals, CreateWrapperProxyHandler, DestroyRustJSPrincipals,
-    GetProxyHandler, GetProxyHandlerExtra, GetProxyHandlerFamily, GetProxyPrivate,
-    GetProxyReservedSlot, GetRustJSPrincipalsPrivate, GetWindowProxyClass, IsProxyHandlerFamily,
-    IsWrapper, JSPrincipalsCallbacks, JS_GetReservedSlot, NewProxyObject, NewWindowProxy,
-    ProxyTraps, SetProxyPrivate, SetProxyReservedSlot, UncheckedUnwrapObject,
+    CreateForwardingProxyHandler, CreateProxyHandler, CreateRustJSPrincipals,
+    CreateWrapperProxyHandler, DestroyRustJSPrincipals, GetProxyHandler, GetProxyHandlerExtra,
+    GetProxyHandlerFamily, GetProxyPrivate, GetProxyReservedSlot, GetRustJSPrincipalsPrivate,
+    GetWindowProxyClass, IsProxyHandlerFamily, IsWrapper, JSPrincipalsCallbacks,
+    JS_GetReservedSlot, NewProxyObject, NewWindowProxy, ProxyTraps, SetProxyPrivate,
+    SetProxyReservedSlot, UncheckedUnwrapObject,
 };
 use mozjs::jsapi::{
     CheckedUnwrapStatic, Compartment, CompartmentIterResult, GCContext, GCReason,
@@ -523,6 +524,99 @@ fn dom_proxy_traps() {
             v.handle_mut()
         ));
         assert_eq!(v.get().to_int32(), 2);
+    });
+}
+
+thread_local! {
+    static FORWARDED_DEFINES: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Defines on the target, counting the calls.
+unsafe extern "C" fn counting_define_property(
+    cx: *mut RawJSContext,
+    proxy: RawHandleObject,
+    id: HandleId,
+    desc: Handle<PropertyDescriptor>,
+    result: *mut ObjectOpResult,
+) -> bool {
+    FORWARDED_DEFINES.with(|c| c.set(c.get() + 1));
+    let mut target = UndefinedValue();
+    GetProxyPrivate(*proxy, &mut target);
+    let target = target.to_object();
+    JS_DefinePropertyById(cx, Handle::from_marked_location(&target), id, desc, result)
+}
+
+#[test]
+fn forwarding_proxy_handler() {
+    with_runtime(|cx| unsafe {
+        rooted!(&in(cx) let global = new_global(cx, &SIMPLE_GLOBAL_CLASS, &RealmOptions::default(), ptr::null_mut()));
+        let mut realm = AutoRealm::new_from_handle(cx, global.handle());
+        let cx = &mut *realm;
+        let traps = ProxyTraps {
+            defineProperty: Some(counting_define_property),
+            ..Default::default()
+        };
+        let handler = CreateForwardingProxyHandler(&traps, &EXTRA as *const u8 as *const c_void);
+        rooted!(&in(cx) let target = eval(cx, global.handle(), "[1, 2, 3]"));
+        let proxy = NewProxyObject(
+            cx.raw_cx(),
+            handler,
+            target.handle().into(),
+            ptr::null_mut(),
+            ptr::null(),
+            true,
+        );
+        assert!(!proxy.is_null());
+        rooted!(&in(cx) let p = proxy);
+        set_global(cx, global.handle(), c"p", ObjectValue(p.get()));
+        set_global(cx, global.handle(), c"t", target.get());
+
+        // In the handler family, with its extra, and not a wrapper.
+        assert!(IsProxyHandlerFamily(p.get()));
+        assert!(!IsWrapper(p.get()));
+        assert_eq!(
+            GetProxyHandlerExtra(p.get()),
+            &EXTRA as *const u8 as *const c_void
+        );
+
+        // Missing traps forward to the target.
+        eval_true(
+            cx,
+            global.handle(),
+            "p[0] === 1 && p.length === 3 && p[5] === undefined",
+        );
+        eval_true(cx, global.handle(), "1 in p && !(5 in p) && 'push' in p");
+        eval_true(cx, global.handle(), "Object.keys(p).join() === '0,1,2'");
+        eval_true(
+            cx,
+            global.handle(),
+            "Object.getPrototypeOf(p) === Array.prototype",
+        );
+        eval_true(
+            cx,
+            global.handle(),
+            "Object.getOwnPropertyDescriptor(p, 'length').value === 3",
+        );
+        eval_true(
+            cx,
+            global.handle(),
+            "Object.isExtensible(p) && p.hasOwnProperty(2) && !p.hasOwnProperty(3)",
+        );
+        eval_true(cx, global.handle(), "delete p[2] && !(2 in t)");
+
+        // A trap it has runs instead.
+        FORWARDED_DEFINES.with(|c| c.set(0));
+        eval_true(
+            cx,
+            global.handle(),
+            "Object.defineProperty(p, 'x', { value: 7, configurable: true }); t.x === 7 && p.x === 7",
+        );
+        assert_eq!(FORWARDED_DEFINES.with(Cell::get), 1);
+        eval_true(
+            cx,
+            global.handle(),
+            "Object.preventExtensions(p); !Object.isExtensible(t)",
+        );
     });
 }
 

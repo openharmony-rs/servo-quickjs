@@ -2,6 +2,7 @@
 
 # Proxy handlers and external string callbacks live as long as the process, as with SpiderMonkey.
 leak:mozjs::engine::proxy::CreateProxyHandler
+leak:mozjs::engine::proxy::CreateForwardingProxyHandler
 leak:mozjs::engine::proxy::CreateWrapperProxyHandler
 leak:mozjs::engine::string::CreateJSExternalStringCallbacks
 

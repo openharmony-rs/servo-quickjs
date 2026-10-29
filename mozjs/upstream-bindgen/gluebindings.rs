@@ -687,8 +687,12 @@ pub mod root {
         ) -> bool;
     }
     extern "C" {
-        #[link_name = "\u{1}_ZL13HandlerFamily"]
-        pub static mut HandlerFamily: ::std::os::raw::c_int;
+        #[link_name = "\u{1}_ZL17BaseHandlerFamily"]
+        pub static mut BaseHandlerFamily: ::std::os::raw::c_int;
+    }
+    extern "C" {
+        #[link_name = "\u{1}_ZL23ForwardingHandlerFamily"]
+        pub static mut ForwardingHandlerFamily: ::std::os::raw::c_int;
     }
     #[repr(C)]
     pub struct WrapperProxyHandler__bindgen_vtable(::std::os::raw::c_void);
@@ -705,6 +709,24 @@ pub mod root {
             [::std::mem::align_of::<WrapperProxyHandler>() - 8usize];
         ["Offset of field: WrapperProxyHandler::mTraps"]
             [::std::mem::offset_of!(WrapperProxyHandler, mTraps) - 24usize];
+    };
+    #[repr(C)]
+    pub struct BaseProxyHandler__bindgen_vtable(::std::os::raw::c_void);
+    #[repr(C)]
+    pub struct BaseProxyHandler {
+        pub vtable_: *const BaseProxyHandler__bindgen_vtable,
+        pub __bindgen_padding_0: [u64; 2usize],
+        pub mTraps: root::ProxyTraps,
+        pub mExtra: *const ::std::os::raw::c_void,
+    }
+    #[allow(clippy::unnecessary_operation, clippy::identity_op)]
+    const _: () = {
+        ["Size of BaseProxyHandler"][::std::mem::size_of::<BaseProxyHandler>() - 272usize];
+        ["Alignment of BaseProxyHandler"][::std::mem::align_of::<BaseProxyHandler>() - 8usize];
+        ["Offset of field: BaseProxyHandler::mTraps"]
+            [::std::mem::offset_of!(BaseProxyHandler, mTraps) - 24usize];
+        ["Offset of field: BaseProxyHandler::mExtra"]
+            [::std::mem::offset_of!(BaseProxyHandler, mExtra) - 264usize];
     };
     #[repr(C)]
     pub struct ForwardingProxyHandler__bindgen_vtable(::std::os::raw::c_void);
@@ -861,6 +883,12 @@ pub mod root {
     }
     extern "C" {
         pub fn CreateProxyHandler(
+            aTraps: *const root::ProxyTraps,
+            aExtra: *const ::std::os::raw::c_void,
+        ) -> *const ::std::os::raw::c_void;
+    }
+    extern "C" {
+        pub fn CreateForwardingProxyHandler(
             aTraps: *const root::ProxyTraps,
             aExtra: *const ::std::os::raw::c_void,
         ) -> *const ::std::os::raw::c_void;

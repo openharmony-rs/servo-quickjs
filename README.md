@@ -15,7 +15,7 @@ Status: experimental. Servo runs on it with its `js-quickjs` feature, which is n
 ## Crates
 
 - `servo-quickjs`: Fabrice Bellard's QuickJS (upstream commit in `servo-quickjs/quickjs/UPSTREAM`), vendored with local patches, and pregenerated bindings.
-- `mozjs`: the `mozjs` 0.26.7 API on QuickJS. Its version must equal the `mozjs` version Servo pins.
+- `mozjs`: the `mozjs` 0.26.9 API on QuickJS. Its version must equal the `mozjs` version Servo pins.
 - `gen-bindings`: regenerates the bindings of `servo-quickjs` (`just gen-bindings`).
 - `fuzz`: cargo-fuzz targets.
 

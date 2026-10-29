@@ -4,7 +4,7 @@ Design: `docs/design.md`. Read it first.
 
 ## How a function gets implemented
 
-- `mozjs/upstream-bindgen/*.rs` is SpiderMonkey's bindgen output for mozjs_sys 153.3.0-3 (x86_64 Linux, from a Servo debug build's `mozjs_sys` `OUT_DIR`). Don't edit it.
+- `mozjs/upstream-bindgen/*.rs` is SpiderMonkey's bindgen output for mozjs_sys 153.4.0-1 (x86_64 Linux, from a Servo debug build's `mozjs_sys` `OUT_DIR`). Don't edit it.
 - `mozjs/build.rs` runs `mozjs/stub_bindings.py`. It turns every SpiderMonkey function into a Rust function:
   - If `mozjs/src/engine/**/*.rs` contains `pub(crate) unsafe fn NAME(`, the function forwards to it.
   - Otherwise its body panics with "`NAME` is not implemented".
@@ -51,7 +51,7 @@ Design: `docs/design.md`. Read it first.
 ## Testing
 
 - `just test` (`QJS_TARGET_DIR` sets the target dir), and `just test-verify` with the tracing verifier.
-- The mozjs 0.26.7 tests are in `mozjs/tests/` (see `mozjs/upstream-tests/README.md` for the local changes).
+- The mozjs 0.26.9 tests are in `mozjs/tests/` (see `mozjs/upstream-tests/README.md` for the local changes).
 - Add focused tests for your area as `mozjs/tests/qjs_<area>.rs`.
 - `qjs_intl` expects ICU 74's data, on Linux the system ICU's (Ubuntu 24.04's).
 
