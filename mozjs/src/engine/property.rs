@@ -1301,3 +1301,19 @@ pub(crate) unsafe fn GetArrayLength(
     *lengthp = out;
     ok(r)
 }
+
+/// Sets `length` as `[[Set]]` does in strict code: a failure throws, as `SetLengthProperty` does.
+pub(crate) unsafe fn SetArrayLength(
+    cx: *mut root::JSContext,
+    obj: root::JS::Handle<*mut root::JSObject>,
+    length: u32,
+) -> bool {
+    let cx = Cx::from_raw(cx);
+    let len = q::JS_NewUint32(cx.qctx(), length);
+    ok(q::JS_SetPropertyStr(
+        cx.qctx(),
+        obj_val(*obj.ptr),
+        c"length".as_ptr(),
+        len,
+    ))
+}

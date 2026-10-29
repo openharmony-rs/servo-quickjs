@@ -27,8 +27,8 @@ use mozjs::rust::wrappers2::{
     JS_GetElement, JS_GetFunctionId, JS_GetPropertyById, JS_HasInstance, JS_IsExceptionPending,
     JS_NewGlobalObject, JS_NewPlainObject, JS_SetElement, JS_SetProperty, MapEntries, MapGet,
     MapSet, MapSize, NewArrayObject, NewDateObject, NewFunctionWithReserved, NewMapObject,
-    NewSetObject, NewUCRegExpObject, NewWeakMapObject, ObjectIsDate, SetAdd, SetWeakMapEntry,
-    JS_GC,
+    NewSetObject, NewUCRegExpObject, NewWeakMapObject, ObjectIsDate, SetAdd, SetArrayLength,
+    SetWeakMapEntry, JS_GC,
 };
 use mozjs::rust::{
     evaluate_script, for_of, CompileOptionsWrapper, HandleObject, IdVector, JSEngine,
@@ -101,6 +101,23 @@ fn arrays() {
         assert_eq!(element.get().to_int32(), 3);
 
         rooted!(&in(cx) let sized = NewArrayObject1(cx.raw_cx(), 5));
+        assert!(GetArrayLength(cx, sized.handle(), &mut length));
+        assert_eq!(length, 5);
+
+        // SetArrayLength truncates and extends, and throws where `length` can't be set.
+        rooted!(&in(cx) let resized = NewArrayObject(cx, &HandleValueArray::from(&values)));
+        assert!(SetArrayLength(cx, resized.handle(), 1));
+        assert!(GetArrayLength(cx, resized.handle(), &mut length));
+        assert_eq!(length, 1);
+        assert!(JS_GetElement(cx, resized.handle(), 1, element.handle_mut()));
+        assert!(element.get().is_undefined());
+        assert!(SetArrayLength(cx, resized.handle(), 4));
+        assert!(GetArrayLength(cx, resized.handle(), &mut length));
+        assert_eq!(length, 4);
+        assert!(JS_FreezeObject(cx, sized.handle()));
+        assert!(!SetArrayLength(cx, sized.handle(), 2));
+        assert!(JS_IsExceptionPending(cx));
+        JS_ClearPendingException(cx);
         assert!(GetArrayLength(cx, sized.handle(), &mut length));
         assert_eq!(length, 5);
 
