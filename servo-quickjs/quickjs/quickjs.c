@@ -485,6 +485,7 @@ typedef struct JSStackFrame {
     /* only used in generators. Current stack pointer value. NULL if
        the function is running. */
     JSValue *cur_sp;
+    JSValue this_obj; /* Servo: borrowed, for debuggers (Q47) */
 } JSStackFrame;
 
 typedef enum {
@@ -786,7 +787,8 @@ typedef struct JSFunctionBytecode {
     uint8_t read_only_bytecode : 1;
     uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
     uint8_t has_breakpoints : 1; /* Servo: some instructions are OP_breakpoint (Q45) */
-    /* XXX: 9 bits available */
+    uint8_t is_toplevel : 1; /* Servo: the code of a script, module or eval (Q47) */
+    /* XXX: 8 bits available */
     uint8_t *byte_code_buf; /* (self pointer) */
     int byte_code_len;
     JSAtom func_name;
@@ -18103,6 +18105,7 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     ctx = p->u.cfunc.realm; /* change the current realm */
     sf->js_mode = 0;
     sf->cur_func = (JSValue)func_obj;
+    sf->this_obj = this_obj; /* Servo (Q47) */
     sf->arg_count = argc;
     arg_buf = argv;
 
@@ -18621,6 +18624,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     arg_buf = argv;
     sf->arg_count = argc;
     sf->cur_func = (JSValue)func_obj;
+    sf->this_obj = this_obj; /* Servo (Q47) */
     var_refs = p->u.func.var_refs;
 
     local_buf = alloca(alloca_size);
@@ -21753,6 +21757,7 @@ static JSAsyncFunctionState *async_func_init(JSContext *ctx,
     sf->arg_buf = (JSValue *)(s + 1);
     sf->cur_func = JS_DupValue(ctx, func_obj);
     s->this_val = JS_DupValue(ctx, this_obj);
+    sf->this_obj = s->this_val; /* Servo (Q47) */
     s->argc = argc;
     sf->arg_count = arg_buf_len;
     sf->var_buf = sf->arg_buf + arg_buf_len;
@@ -37375,6 +37380,7 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     b->super_call_allowed = fd->super_call_allowed;
     b->super_allowed = fd->super_allowed;
     b->arguments_allowed = fd->arguments_allowed;
+    b->is_toplevel = fd->is_eval; /* Servo (Q47) */
     b->is_direct_or_indirect_eval = (fd->eval_type == JS_EVAL_TYPE_DIRECT ||
                                      fd->eval_type == JS_EVAL_TYPE_INDIRECT);
     b->realm = JS_DupContext(ctx);
@@ -63968,6 +63974,464 @@ void JS_SetNativeCallHook(JSRuntime *rt, JSNativeCallHook *hook, void *opaque)
 {
     rt->native_call_hook = hook;
     rt->native_call_opaque = opaque;
+}
+
+/* Servo: frames and scripts for debuggers (Q47) */
+
+JSStackFrame *JS_GetCurrentFrame(JSRuntime *rt)
+{
+    return rt->current_stack_frame;
+}
+
+JSStackFrame *JS_GetOlderFrame(JSStackFrame *sf)
+{
+    return sf->prev_frame;
+}
+
+static JSFunctionBytecode *js_frame_bytecode(JSStackFrame *sf)
+{
+    JSObject *p;
+
+    if (JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
+        return NULL;
+    p = JS_VALUE_GET_OBJ(sf->cur_func);
+    if (!js_class_has_bytecode(p->class_id))
+        return NULL;
+    return p->u.func.function_bytecode;
+}
+
+JSValueConst JS_GetFrameFunction(JSStackFrame *sf)
+{
+    return sf->cur_func;
+}
+
+JSValueConst JS_GetFrameScript(JSStackFrame *sf)
+{
+    JSFunctionBytecode *b = js_frame_bytecode(sf);
+
+    return b ? JS_MKPTR(JS_TAG_FUNCTION_BYTECODE, b) : JS_UNDEFINED;
+}
+
+uint32_t JS_GetFramePC(JSStackFrame *sf)
+{
+    JSFunctionBytecode *b = js_frame_bytecode(sf);
+
+    if (!b || !sf->cur_pc || sf->cur_pc == b->byte_code_buf)
+        return 0;
+    return sf->cur_pc - b->byte_code_buf - 1;
+}
+
+JSValueConst JS_GetFrameThis(JSStackFrame *sf)
+{
+    return js_frame_bytecode(sf) ? sf->this_obj : JS_UNDEFINED;
+}
+
+/* the slot of a variable of a bytecode frame, or NULL */
+static JSValue *js_frame_variable(JSStackFrame *sf, JSVariableKind kind, int idx)
+{
+    JSFunctionBytecode *b = js_frame_bytecode(sf);
+    JSObject *p;
+    JSVarRef *var_ref;
+
+    if (!b || idx < 0)
+        return NULL;
+    switch(kind) {
+    case JS_VARIABLE_ARG:
+        return idx < b->arg_count ? &sf->arg_buf[idx] : NULL;
+    case JS_VARIABLE_LOCAL:
+        return idx < b->var_count ? &sf->var_buf[idx] : NULL;
+    case JS_VARIABLE_CLOSURE:
+        p = JS_VALUE_GET_OBJ(sf->cur_func);
+        if (idx >= b->closure_var_count || !p->u.func.var_refs)
+            return NULL;
+        var_ref = p->u.func.var_refs[idx];
+        if (!var_ref)
+            return NULL;
+        /* a global that is no variable (such as an accessor property, or none)
+           has the realm's placeholder, which the interpreter reads through */
+        switch(b->closure_var[idx].closure_type) {
+        case JS_CLOSURE_GLOBAL_REF:
+        case JS_CLOSURE_GLOBAL_DECL:
+        case JS_CLOSURE_GLOBAL:
+            if (JS_VALUE_GET_TAG(*var_ref->pvalue) == JS_TAG_UNINITIALIZED &&
+                !var_ref->is_lexical)
+                return NULL;
+            break;
+        default:
+            break;
+        }
+        return var_ref->pvalue;
+    default:
+        return NULL;
+    }
+}
+
+int JS_GetFrameVariable(JSContext *ctx, JSStackFrame *sf, JSVariableKind kind, int idx,
+                        JSValue *pval)
+{
+    JSValue *slot = js_frame_variable(sf, kind, idx);
+
+    if (!slot)
+        return -1;
+    *pval = JS_DupValue(ctx, *slot);
+    return 0;
+}
+
+int JS_SetFrameVariable(JSContext *ctx, JSStackFrame *sf, JSVariableKind kind, int idx,
+                        JSValue val)
+{
+    JSValue *slot = js_frame_variable(sf, kind, idx);
+
+    if (!slot) {
+        JS_FreeValue(ctx, val);
+        return -1;
+    }
+    set_value(ctx, slot, val);
+    return 0;
+}
+
+JSValueConst JS_GetFunctionScript(JSValueConst func)
+{
+    JSObject *p;
+
+    if (JS_VALUE_GET_TAG(func) != JS_TAG_OBJECT)
+        return JS_UNDEFINED;
+    p = JS_VALUE_GET_OBJ(func);
+    if (!js_class_has_bytecode(p->class_id))
+        return JS_UNDEFINED;
+    return JS_MKPTR(JS_TAG_FUNCTION_BYTECODE, p->u.func.function_bytecode);
+}
+
+JSCallKind JS_GetScriptCall(JSRuntime *rt, JSValueConst script, uint32_t pc, int *pargc)
+{
+    JSFunctionBytecode *b = js_script_bytecode(script);
+    int op;
+
+    *pargc = -1;
+    if (!b || !js_is_instruction(rt, b, pc))
+        return JS_CALL_NONE;
+    op = js_breakpoint_opcode(rt, b, pc);
+    switch(op) {
+    case OP_call:
+    case OP_tail_call:
+    case OP_eval:
+        *pargc = get_u16(b->byte_code_buf + pc + 1);
+        return JS_CALL_FUNCTION;
+#if SHORT_OPCODES
+    case OP_call0:
+    case OP_call1:
+    case OP_call2:
+    case OP_call3:
+        *pargc = op - OP_call0;
+        return JS_CALL_FUNCTION;
+#endif
+    case OP_apply:
+    case OP_apply_eval:
+        return JS_CALL_FUNCTION;
+    case OP_call_method:
+    case OP_tail_call_method:
+        *pargc = get_u16(b->byte_code_buf + pc + 1);
+        return JS_CALL_METHOD;
+    case OP_call_constructor:
+        *pargc = get_u16(b->byte_code_buf + pc + 1);
+        return JS_CALL_CONSTRUCTOR;
+    default:
+        return JS_CALL_NONE;
+    }
+}
+
+int JS_GetScriptInfo(JSValueConst script, JSScriptInfo *info)
+{
+    JSFunctionBytecode *b = js_script_bytecode(script);
+    int col_num;
+
+    if (!b)
+        return -1;
+    memset(info, 0, sizeof(*info));
+    info->func_name = b->func_name;
+    info->func_kind = b->func_kind;
+    info->is_toplevel = b->is_toplevel;
+    info->is_eval = b->is_direct_or_indirect_eval;
+    info->is_strict = (b->js_mode & JS_MODE_STRICT) != 0;
+    info->has_debug = b->has_debug;
+    info->line_num = find_line_num(NULL, b, -1, &col_num);
+    info->col_num = col_num;
+    info->byte_code_len = b->byte_code_len;
+    info->arg_count = b->arg_count;
+    info->var_count = b->var_count;
+    info->closure_var_count = b->closure_var_count;
+    return 0;
+}
+
+int JS_GetScriptVariable(JSValueConst script, JSVariableKind kind, int idx,
+                         JSScriptVariable *var)
+{
+    JSFunctionBytecode *b = js_script_bytecode(script);
+    JSBytecodeVarDef *vd;
+    JSClosureVar *cv;
+
+    if (!b || idx < 0)
+        return -1;
+    memset(var, 0, sizeof(*var));
+    switch(kind) {
+    case JS_VARIABLE_ARG:
+    case JS_VARIABLE_LOCAL:
+        if (kind == JS_VARIABLE_LOCAL) {
+            if (idx >= b->var_count)
+                return -1;
+            idx += b->arg_count;
+        } else if (idx >= b->arg_count) {
+            return -1;
+        }
+        if (!b->vardefs)
+            return 0;
+        vd = &b->vardefs[idx];
+        var->name = vd->var_name;
+        var->is_lexical = vd->is_lexical;
+        var->is_const = vd->is_const;
+        return 0;
+    case JS_VARIABLE_CLOSURE:
+        if (idx >= b->closure_var_count)
+            return -1;
+        cv = &b->closure_var[idx];
+        var->name = cv->var_name;
+        var->is_lexical = cv->is_lexical;
+        var->is_const = cv->is_const;
+        switch(cv->closure_type) {
+        case JS_CLOSURE_LOCAL:
+        case JS_CLOSURE_ARG:
+        case JS_CLOSURE_REF:
+            var->binding = JS_BINDING_FUNCTION;
+            break;
+        case JS_CLOSURE_GLOBAL_DECL:
+            var->binding = JS_BINDING_GLOBAL_DECL;
+            break;
+        case JS_CLOSURE_GLOBAL_REF:
+        case JS_CLOSURE_GLOBAL:
+            var->binding = JS_BINDING_GLOBAL;
+            break;
+        default:
+            var->binding = JS_BINDING_MODULE;
+            break;
+        }
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+int JS_IterateScriptPositions(JSValueConst script, JSScriptPositionCallback *cb,
+                              void *opaque)
+{
+    JSFunctionBytecode *b = js_script_bytecode(script);
+    const uint8_t *p, *p_end;
+    uint32_t val, pc;
+    int line_num, col_num, v, ret;
+    unsigned int op;
+
+    if (!b)
+        return -1;
+    if (!b->has_debug || !b->debug.pc2line_buf)
+        return 0;
+    p = b->debug.pc2line_buf;
+    p_end = p + b->debug.pc2line_len;
+    /* the same format as in find_line_num() */
+    ret = get_leb128(&val, p, p_end);
+    if (ret < 0)
+        return -1;
+    p += ret;
+    line_num = val + 1;
+    ret = get_leb128(&val, p, p_end);
+    if (ret < 0)
+        return -1;
+    p += ret;
+    col_num = val + 1;
+    pc = 0;
+    if (cb(opaque, pc, line_num, col_num))
+        return 0;
+    while (p < p_end) {
+        op = *p++;
+        if (op == 0) {
+            ret = get_leb128(&val, p, p_end);
+            if (ret < 0)
+                return -1;
+            pc += val;
+            p += ret;
+            ret = get_sleb128(&v, p, p_end);
+            if (ret < 0)
+                return -1;
+            p += ret;
+            line_num += v;
+        } else {
+            op -= PC2LINE_OP_FIRST;
+            pc += (op / PC2LINE_RANGE);
+            line_num += (op % PC2LINE_RANGE) + PC2LINE_BASE;
+        }
+        ret = get_sleb128(&v, p, p_end);
+        if (ret < 0)
+            return -1;
+        p += ret;
+        col_num += v;
+        if (cb(opaque, pc, line_num, col_num))
+            return 0;
+    }
+    return 0;
+}
+
+int JS_GetScriptLocation(JSValueConst script, uint32_t pc, int *pcol_num)
+{
+    JSFunctionBytecode *b = js_script_bytecode(script);
+
+    if (!b) {
+        *pcol_num = 0;
+        return 0;
+    }
+    return find_line_num(NULL, b, pc, pcol_num);
+}
+
+int JS_IterateScriptChildren(JSValueConst script, JSScriptChildCallback *cb, void *opaque)
+{
+    JSFunctionBytecode *b = js_script_bytecode(script);
+    int i;
+
+    if (!b)
+        return -1;
+    for(i = 0; i < b->cpool_count; i++) {
+        if (JS_VALUE_GET_TAG(b->cpool[i]) == JS_TAG_FUNCTION_BYTECODE &&
+            cb(opaque, b->cpool[i]))
+            break;
+    }
+    return 0;
+}
+
+/* whether an instruction can change state that outlives the frame: variables of
+   other functions and global ones, properties, prototypes, and suspending.
+   Calls (and getters and setters) aren't: debuggers see them as frames and native
+   calls. */
+static BOOL js_opcode_is_effectful(int op)
+{
+    switch(op) {
+    case OP_put_var:
+    case OP_put_var_init:
+    case OP_put_ref_value:
+    case OP_put_field:
+    case OP_put_private_field:
+    case OP_define_private_field:
+    case OP_put_array_el:
+    case OP_put_super_value:
+    case OP_set_proto:
+    case OP_put_var_ref:
+    case OP_set_var_ref:
+    case OP_put_var_ref_check:
+    case OP_put_var_ref_check_init:
+    case OP_with_put_var:
+    case OP_with_delete_var:
+    case OP_delete:
+    case OP_delete_var:
+    case OP_import:
+    case OP_eval: /* direct eval can declare global variables */
+    case OP_apply_eval:
+    case OP_initial_yield:
+    case OP_yield:
+    case OP_yield_star:
+    case OP_async_yield_star:
+    case OP_await:
+#if SHORT_OPCODES
+    case OP_put_var_ref0:
+    case OP_put_var_ref1:
+    case OP_put_var_ref2:
+    case OP_put_var_ref3:
+    case OP_set_var_ref0:
+    case OP_set_var_ref1:
+    case OP_set_var_ref2:
+    case OP_set_var_ref3:
+#endif
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+int JS_IterateScriptEffectfulOffsets(JSRuntime *rt, JSValueConst script,
+                                     JSScriptOffsetCallback *cb, void *opaque)
+{
+    JSFunctionBytecode *b = js_script_bytecode(script);
+    uint32_t pos;
+    int op;
+
+    if (!b)
+        return -1;
+    for(pos = 0; pos < b->byte_code_len; pos += short_opcode_info(op).size) {
+        op = js_breakpoint_opcode(rt, b, pos);
+        if (js_opcode_is_effectful(op) && cb(opaque, pos))
+            break;
+    }
+    return 0;
+}
+
+/* the target of the jump instruction at 'pos' with opcode 'op', or -1 */
+static int js_jump_target(JSFunctionBytecode *b, uint32_t pos, int op)
+{
+    const uint8_t *p = b->byte_code_buf + pos + 1;
+
+    switch(op) {
+    case OP_goto:
+    case OP_if_true:
+    case OP_if_false:
+        return pos + 1 + (int32_t)get_u32(p);
+#if SHORT_OPCODES
+    case OP_goto16:
+        return pos + 1 + (int16_t)get_u16(p);
+    case OP_goto8:
+    case OP_if_true8:
+    case OP_if_false8:
+        return pos + 1 + (int8_t)p[0];
+#endif
+    default:
+        return -1;
+    }
+}
+
+int JS_IterateScriptLoopOffsets(JSRuntime *rt, JSValueConst script,
+                                JSScriptOffsetCallback *cb, void *opaque)
+{
+    JSFunctionBytecode *b = js_script_bytecode(script);
+    uint32_t pos;
+    int op, target;
+
+    if (!b)
+        return -1;
+    for(pos = 0; pos < b->byte_code_len; pos += short_opcode_info(op).size) {
+        op = js_breakpoint_opcode(rt, b, pos);
+        target = js_jump_target(b, pos, op);
+        if (target >= 0 && (uint32_t)target <= pos && cb(opaque, pos))
+            break;
+    }
+    return 0;
+}
+
+JSValue JS_GetIntrinsicEval(JSContext *ctx)
+{
+    return JS_DupValue(ctx, ctx->eval_obj);
+}
+
+
+int JS_GetGlobalLexicalNames(JSContext *ctx, JSPropertyEnum **ptab, uint32_t *plen)
+{
+    return JS_GetOwnPropertyNames(ctx, ptab, plen, ctx->global_var_obj,
+                                  JS_GPN_STRING_MASK);
+}
+
+int JS_GetGlobalLexicalVariable(JSContext *ctx, JSAtom name, JSValue *pval)
+{
+    JSShapeProperty *prs;
+    JSProperty *pr;
+
+    prs = find_own_property(&pr, JS_VALUE_GET_OBJ(ctx->global_var_obj), name);
+    if (!prs || (prs->flags & JS_PROP_TMASK) != JS_PROP_VARREF)
+        return -1;
+    *pval = JS_DupValue(ctx, *pr->u.var_ref->pvalue);
+    return 0;
 }
 
 int JS_ClearBreakpoint(JSRuntime *rt, JSValueConst script, uint32_t pc)

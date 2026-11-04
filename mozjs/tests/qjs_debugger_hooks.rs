@@ -3,7 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 //! QuickJS's debugger hooks, which the emulation of SpiderMonkey's `Debugger` builds on, through
-//! QuickJS's own API: breakpoints (Q45), and frame and native call hooks (Q46).
+//! QuickJS's own API: breakpoints (Q45), frame and native call hooks (Q46), and frames and
+//! scripts (Q47).
 
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, c_void};
@@ -507,5 +508,509 @@ fn native_call_hook() {
                 "native:join"
             ]
         );
+    });
+}
+
+thread_local! {
+    static ON_BREAK: RefCell<Option<Box<dyn FnMut(*mut qjs::JSContext)>>> = RefCell::new(None);
+}
+
+unsafe extern "C" fn run_on_break(
+    ctx: *mut qjs::JSContext,
+    _script: qjs::JSValue,
+    _pc: u32,
+    _opaque: *mut c_void,
+) -> c_int {
+    let mut f = ON_BREAK.with(|b| b.borrow_mut().take()).expect("one break");
+    f(ctx);
+    0
+}
+
+unsafe fn atom_name(ctx: *mut qjs::JSContext, atom: qjs::JSAtom) -> String {
+    if atom == 0 {
+        return String::new();
+    }
+    let s = qjs::JS_AtomToCString(ctx, atom);
+    let r = std::ffi::CStr::from_ptr(s).to_string_lossy().into_owned();
+    qjs::JS_FreeCString(ctx, s);
+    r
+}
+
+unsafe fn script_info(script: qjs::JSValue) -> qjs::JSScriptInfo {
+    let mut info = std::mem::zeroed();
+    assert_eq!(qjs::JS_GetScriptInfo(script, &mut info), 0);
+    info
+}
+
+unsafe extern "C" fn collect_child(opaque: *mut c_void, child: qjs::JSValue) -> c_int {
+    (*(opaque as *mut Vec<qjs::JSValue>)).push(child);
+    0
+}
+
+unsafe fn children(script: qjs::JSValue) -> Vec<qjs::JSValue> {
+    let mut v = Vec::new();
+    assert_eq!(
+        qjs::JS_IterateScriptChildren(script, Some(collect_child), &mut v as *mut _ as *mut c_void),
+        0
+    );
+    v
+}
+
+unsafe extern "C" fn collect_position(
+    opaque: *mut c_void,
+    pc: u32,
+    line: c_int,
+    col: c_int,
+) -> c_int {
+    (*(opaque as *mut Vec<(u32, i32, i32)>)).push((pc, line, col));
+    0
+}
+
+unsafe fn positions(script: qjs::JSValue) -> Vec<(u32, i32, i32)> {
+    let mut v = Vec::new();
+    assert_eq!(
+        qjs::JS_IterateScriptPositions(
+            script,
+            Some(collect_position),
+            &mut v as *mut _ as *mut c_void
+        ),
+        0
+    );
+    v
+}
+
+unsafe extern "C" fn collect_offset(opaque: *mut c_void, pc: u32) -> c_int {
+    (*(opaque as *mut Vec<u32>)).push(pc);
+    0
+}
+
+unsafe fn effectful_offsets(rt: *mut qjs::JSRuntime, script: qjs::JSValue) -> Vec<u32> {
+    let mut v = Vec::new();
+    assert_eq!(
+        qjs::JS_IterateScriptEffectfulOffsets(
+            rt,
+            script,
+            Some(collect_offset),
+            &mut v as *mut _ as *mut c_void
+        ),
+        0
+    );
+    v
+}
+
+/// The names of the variables of a kind of a script.
+unsafe fn variable_names(
+    ctx: *mut qjs::JSContext,
+    script: qjs::JSValue,
+    kind: qjs::JSVariableKind,
+    count: i32,
+) -> Vec<String> {
+    (0..count)
+        .map(|i| {
+            let mut var = std::mem::zeroed();
+            assert_eq!(qjs::JS_GetScriptVariable(script, kind, i, &mut var), 0);
+            atom_name(ctx, var.name)
+        })
+        .collect()
+}
+
+unsafe fn frame_variable(
+    ctx: *mut qjs::JSContext,
+    sf: *mut qjs::JSStackFrame,
+    kind: qjs::JSVariableKind,
+    idx: i32,
+) -> String {
+    let mut v = qjs::JS_UNDEFINED;
+    assert_eq!(qjs::JS_GetFrameVariable(ctx, sf, kind, idx, &mut v), 0);
+    if v.tag() == qjs::JS_TAG_UNINITIALIZED {
+        return "<uninitialized>".to_owned();
+    }
+    let s = describe(ctx, v);
+    qjs::JS_FreeValue(ctx, v);
+    s
+}
+
+const NESTED: &str = "function outer(a) {
+  let captured = a * 2;
+  return function inner(b) {
+    var sum = b + captured;
+    let later = 1;
+    return sum + later;
+  };
+}
+var f = outer(5);
+f(1)";
+
+#[test]
+fn frames_and_variables() {
+    with_global(|cx| unsafe {
+        let script = compile(cx, NESTED);
+        let top = script_value(script);
+        let ctx = script_ctx(script);
+        let rt = qjs::JS_GetRuntime(ctx);
+        let top_info = script_info(top);
+        assert!(top_info.is_toplevel != 0 && top_info.is_eval == 0);
+        let outer = children(top);
+        assert_eq!(outer.len(), 1);
+        let inner = children(outer[0]);
+        assert_eq!(inner.len(), 1);
+        let (outer, inner) = (outer[0], inner[0]);
+        let info = script_info(inner);
+        assert_eq!(atom_name(ctx, info.func_name), "inner");
+        assert!(info.is_toplevel == 0 && info.func_kind == 0 && info.has_debug != 0);
+        assert_eq!((info.line_num, info.col_num), (3, 10));
+        assert_eq!(info.arg_count, 1);
+        assert_eq!(
+            variable_names(ctx, inner, qjs::JS_VARIABLE_ARG, info.arg_count),
+            ["b"]
+        );
+        let locals = variable_names(ctx, inner, qjs::JS_VARIABLE_LOCAL, info.var_count);
+        let closures = variable_names(ctx, inner, qjs::JS_VARIABLE_CLOSURE, info.closure_var_count);
+        let sum = locals.iter().position(|n| n == "sum").unwrap() as i32;
+        let later = locals.iter().position(|n| n == "later").unwrap() as i32;
+        let captured = closures.iter().position(|n| n == "captured").unwrap() as i32;
+        let mut var = std::mem::zeroed();
+        assert_eq!(
+            qjs::JS_GetScriptVariable(inner, qjs::JS_VARIABLE_LOCAL, later, &mut var),
+            0
+        );
+        assert!(var.is_lexical != 0 && var.is_const == 0);
+        assert_eq!(
+            qjs::JS_GetScriptVariable(inner, qjs::JS_VARIABLE_CLOSURE, captured, &mut var),
+            0
+        );
+        assert_eq!(var.binding, qjs::JS_BINDING_FUNCTION);
+        assert_eq!(
+            qjs::JS_GetScriptVariable(inner, qjs::JS_VARIABLE_ARG, 1, &mut var),
+            -1
+        );
+
+        // Positions: in order, from the function's start, within its lines.
+        let pos = positions(inner);
+        assert_eq!(pos[0], (0, 3, 10));
+        assert!(pos.windows(2).all(|w| w[0].0 <= w[1].0));
+        assert!(pos.iter().all(|&(_, line, _)| (3..=7).contains(&line)));
+        assert!([4, 5, 6].iter().all(|l| pos.iter().any(|p| p.1 == *l)));
+        let (last_pc, last_line, last_col) = *pos.last().unwrap();
+        let mut col = 0;
+        assert_eq!(
+            qjs::JS_GetScriptLocation(inner, last_pc, &mut col),
+            last_line
+        );
+        assert_eq!(col, last_col);
+
+        // At the first instruction of `var sum = …` in `inner`, from `f(1)`: lexical variables
+        // are uninitialized from the start of their scope, after the function's first instruction.
+        let at = pos.iter().find(|p| p.1 == 4).unwrap().0;
+        ON_BREAK.with(|b| {
+            *b.borrow_mut() = Some(Box::new(move |ctx| {
+                let sf = qjs::JS_GetCurrentFrame(rt);
+                assert!(!sf.is_null());
+                assert_eq!(qjs::JS_GetFrameScript(sf).ptr(), inner.ptr());
+                assert_eq!(qjs::JS_GetFramePC(sf), at);
+                assert_eq!(qjs::JS_GetFrameThis(sf).tag(), qjs::JS_TAG_UNDEFINED);
+                assert_eq!(
+                    describe(ctx, qjs::JS_GetFrameFunction(sf))
+                        .split('(')
+                        .next(),
+                    Some("function inner")
+                );
+                assert_eq!(frame_variable(ctx, sf, qjs::JS_VARIABLE_ARG, 0), "1");
+                assert_eq!(
+                    frame_variable(ctx, sf, qjs::JS_VARIABLE_LOCAL, sum),
+                    "undefined"
+                );
+                assert_eq!(
+                    frame_variable(ctx, sf, qjs::JS_VARIABLE_LOCAL, later),
+                    "<uninitialized>"
+                );
+                assert_eq!(
+                    frame_variable(ctx, sf, qjs::JS_VARIABLE_CLOSURE, captured),
+                    "10"
+                );
+                let mut v = qjs::JS_UNDEFINED;
+                assert_eq!(
+                    qjs::JS_GetFrameVariable(ctx, sf, qjs::JS_VARIABLE_ARG, 5, &mut v),
+                    -1
+                );
+                assert_eq!(
+                    qjs::JS_SetFrameVariable(
+                        ctx,
+                        sf,
+                        qjs::JS_VARIABLE_ARG,
+                        0,
+                        qjs::JS_NewInt32(ctx, 100)
+                    ),
+                    0
+                );
+                assert_eq!(
+                    qjs::JS_SetFrameVariable(
+                        ctx,
+                        sf,
+                        qjs::JS_VARIABLE_CLOSURE,
+                        captured,
+                        qjs::JS_NewInt32(ctx, 20)
+                    ),
+                    0
+                );
+                let older = qjs::JS_GetOlderFrame(sf);
+                assert_eq!(qjs::JS_GetFrameScript(older).ptr(), top.ptr());
+                let mut col = 0;
+                assert_eq!(
+                    qjs::JS_GetScriptLocation(top, qjs::JS_GetFramePC(older), &mut col),
+                    10
+                );
+                // The frames of native functions have no script.
+                let mut n = 0;
+                let mut f = older;
+                while !f.is_null() {
+                    n += 1;
+                    f = qjs::JS_GetOlderFrame(f);
+                }
+                assert_eq!(n, 1, "the script's is the oldest frame");
+            }));
+        });
+        qjs::JS_SetBreakpointHandler(rt, Some(run_on_break), ptr::null_mut());
+        assert_eq!(qjs::JS_SetBreakpoint(ctx, inner, at), 0);
+        assert_eq!(execute(cx, script).as_deref(), Some("121"), "100 + 20 + 1");
+        assert!(
+            ON_BREAK.with(|b| b.borrow().is_none()),
+            "the breakpoint hit"
+        );
+        assert_eq!(qjs::JS_ClearBreakpoint(rt, inner, at), 0);
+        qjs::JS_SetBreakpointHandler(rt, None, ptr::null_mut());
+        let _ = outer;
+    });
+}
+
+#[test]
+fn effectful_offsets_and_global_lexicals() {
+    with_global(|cx| unsafe {
+        let script = compile(
+            cx,
+            "function g(o) { let z = 2; z++; o.y = z; return z; }
+             function h(o) { return o.y + 1; }
+             let early = 1; const fixed = 2;
+             g({}) + h({ y: 1 })",
+        );
+        let top = script_value(script);
+        let ctx = script_ctx(script);
+        let rt = qjs::JS_GetRuntime(ctx);
+        let fns = children(top);
+        assert_eq!(fns.len(), 2);
+        assert_eq!(effectful_offsets(rt, fns[0]).len(), 1, "o.y = z");
+        assert!(effectful_offsets(rt, fns[1]).is_empty());
+        // The declarations of the script are closure variables bound to it.
+        let info = script_info(top);
+        let mut decls = Vec::new();
+        for i in 0..info.closure_var_count {
+            let mut var = std::mem::zeroed();
+            assert_eq!(
+                qjs::JS_GetScriptVariable(top, qjs::JS_VARIABLE_CLOSURE, i, &mut var),
+                0
+            );
+            if var.binding == qjs::JS_BINDING_GLOBAL_DECL {
+                decls.push(atom_name(ctx, var.name));
+            }
+        }
+        decls.sort();
+        assert_eq!(decls, ["early", "fixed", "g", "h"]);
+
+        ON_BREAK.with(|b| {
+            *b.borrow_mut() = Some(Box::new(|ctx| {
+                let atom = qjs::JS_NewAtom(ctx, c"early".as_ptr());
+                let mut v = qjs::JS_UNDEFINED;
+                assert_eq!(qjs::JS_GetGlobalLexicalVariable(ctx, atom, &mut v), 0);
+                assert_eq!(
+                    v.tag(),
+                    qjs::JS_TAG_UNINITIALIZED,
+                    "declared, not initialized"
+                );
+                qjs::JS_FreeAtom(ctx, atom);
+            }));
+        });
+        qjs::JS_SetBreakpointHandler(rt, Some(run_on_break), ptr::null_mut());
+        assert_eq!(qjs::JS_SetBreakpoint(ctx, top, 0), 0);
+        assert_eq!(execute(cx, script).as_deref(), Some("5"));
+        qjs::JS_SetBreakpointHandler(rt, None, ptr::null_mut());
+
+        let mut tab = ptr::null_mut();
+        let mut len = 0;
+        assert_eq!(qjs::JS_GetGlobalLexicalNames(ctx, &mut tab, &mut len), 0);
+        let mut names: Vec<String> = (0..len as usize)
+            .map(|i| atom_name(ctx, (*tab.add(i)).atom))
+            .collect();
+        qjs::JS_FreePropertyEnum(ctx, tab, len);
+        names.sort();
+        assert_eq!(names, ["early", "fixed"]);
+        let atom = qjs::JS_NewAtom(ctx, c"fixed".as_ptr());
+        let mut v = qjs::JS_UNDEFINED;
+        assert_eq!(qjs::JS_GetGlobalLexicalVariable(ctx, atom, &mut v), 0);
+        assert_eq!(v.int(), 2);
+        qjs::JS_FreeAtom(ctx, atom);
+        let atom = qjs::JS_NewAtom(ctx, c"g".as_ptr());
+        assert_eq!(
+            qjs::JS_GetGlobalLexicalVariable(ctx, atom, &mut v),
+            -1,
+            "g is a global var"
+        );
+        qjs::JS_FreeAtom(ctx, atom);
+    });
+}
+
+unsafe fn loop_offsets(rt: *mut qjs::JSRuntime, script: qjs::JSValue) -> Vec<u32> {
+    unsafe extern "C" fn collect(opaque: *mut c_void, pc: u32) -> c_int {
+        (*(opaque as *mut Vec<u32>)).push(pc);
+        0
+    }
+    let mut offsets = Vec::new();
+    assert_eq!(
+        qjs::JS_IterateScriptLoopOffsets(
+            rt,
+            script,
+            Some(collect),
+            &mut offsets as *mut _ as *mut c_void
+        ),
+        0
+    );
+    offsets
+}
+
+#[test]
+fn loops_and_eval() {
+    with_global(|cx| unsafe {
+        let script = compile(
+            cx,
+            "function none(a) { if (a) return 1; return 2; }
+             function empty() { for (;;) {} }
+             function loops(n) { while (n > 0) n--; do { n++; } while (n < 3); for (const x of [1]) {} }
+             function direct(s) { return eval(s); }
+             0",
+        );
+        let top = script_value(script);
+        let ctx = script_ctx(script);
+        let rt = qjs::JS_GetRuntime(ctx);
+        let fns = children(top);
+        assert!(loop_offsets(rt, fns[0]).is_empty(), "no loop");
+        assert_eq!(
+            loop_offsets(rt, fns[1]).len(),
+            1,
+            "an empty loop jumps back"
+        );
+        assert!(
+            loop_offsets(rt, fns[2]).len() >= 3,
+            "while, do-while and for-of"
+        );
+        assert!(!effectful_offsets(rt, fns[3]).is_empty(), "direct eval");
+        let global = qjs::JS_GetGlobalObject(ctx);
+        let eval = qjs::JS_GetPropertyStr(ctx, global, c"eval".as_ptr());
+        let intrinsic = qjs::JS_GetIntrinsicEval(ctx);
+        assert_eq!(eval.ptr(), intrinsic.ptr(), "the realm's eval");
+        for v in [eval, intrinsic, global] {
+            qjs::JS_FreeValue(ctx, v);
+        }
+    });
+}
+
+#[test]
+fn global_closure_variables() {
+    with_global(|cx| unsafe {
+        let accessor = compile(
+            cx,
+            "Object.defineProperty(globalThis, 'acc', { get() { return 'getter'; }, configurable: true })",
+        );
+        assert!(execute(cx, accessor).is_some());
+        // `var acc` doesn't replace the accessor, which is no variable.
+        let script = compile(
+            cx,
+            "var acc, plain = 'var';
+             function k() { return acc + ' ' + plain; }
+             k()",
+        );
+        let top = script_value(script);
+        let ctx = script_ctx(script);
+        let rt = qjs::JS_GetRuntime(ctx);
+        let k = children(top)[0];
+        let info = script_info(k);
+        let names = variable_names(ctx, k, qjs::JS_VARIABLE_CLOSURE, info.closure_var_count);
+        let acc = names.iter().position(|n| n == "acc").unwrap() as i32;
+        let plain = names.iter().position(|n| n == "plain").unwrap() as i32;
+        ON_BREAK.with(|b| {
+            *b.borrow_mut() = Some(Box::new(move |ctx| {
+                let sf = qjs::JS_GetCurrentFrame(rt);
+                let mut v = qjs::JS_UNDEFINED;
+                assert_eq!(
+                    qjs::JS_GetFrameVariable(ctx, sf, qjs::JS_VARIABLE_CLOSURE, acc, &mut v),
+                    -1,
+                    "an accessor is no variable"
+                );
+                assert_eq!(
+                    qjs::JS_SetFrameVariable(
+                        ctx,
+                        sf,
+                        qjs::JS_VARIABLE_CLOSURE,
+                        acc,
+                        qjs::JS_NewInt32(ctx, 5)
+                    ),
+                    -1
+                );
+                assert_eq!(
+                    frame_variable(ctx, sf, qjs::JS_VARIABLE_CLOSURE, plain),
+                    "var"
+                );
+            }));
+        });
+        qjs::JS_SetBreakpointHandler(rt, Some(run_on_break), ptr::null_mut());
+        assert_eq!(qjs::JS_SetBreakpoint(ctx, k, 0), 0);
+        assert_eq!(
+            execute(cx, script).as_deref(),
+            Some("\"getter var\""),
+            "the accessor is untouched"
+        );
+        qjs::JS_SetBreakpointHandler(rt, None, ptr::null_mut());
+    });
+}
+
+#[test]
+fn calls_and_function_scripts() {
+    with_global(|cx| unsafe {
+        let script = compile(
+            cx,
+            "var o = { m() {} }; function F() {} var a = [];
+             o.m(1); F(); new F(2); F(...a); o[0];
+             F",
+        );
+        let top = script_value(script);
+        let rt = qjs::JS_GetRuntime(script_ctx(script));
+        let info = script_info(top);
+        let calls: Vec<(qjs::JSCallKind, i32)> = (0..info.byte_code_len)
+            .filter_map(|pc| {
+                let mut argc = 0;
+                let kind = qjs::JS_GetScriptCall(rt, top, pc, &mut argc);
+                (kind != qjs::JS_CALL_NONE).then_some((kind, argc))
+            })
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                (qjs::JS_CALL_METHOD, 1),
+                (qjs::JS_CALL_FUNCTION, 0),
+                (qjs::JS_CALL_CONSTRUCTOR, 1),
+                (qjs::JS_CALL_FUNCTION, -1)
+            ]
+        );
+        assert!(execute(cx, script).is_some());
+        let fns = children(top);
+        let ctx = script_ctx(script);
+        let global = qjs::JS_GetGlobalObject(ctx);
+        let fun = qjs::JS_GetPropertyStr(ctx, global, c"F".as_ptr());
+        let fun_script = qjs::JS_GetFunctionScript(fun);
+        assert!(fns.iter().any(|c| c.ptr() == fun_script.ptr()));
+        let math = qjs::JS_GetPropertyStr(ctx, global, c"Math".as_ptr());
+        let max = qjs::JS_GetPropertyStr(ctx, math, c"max".as_ptr());
+        assert_eq!(qjs::JS_GetFunctionScript(max).tag(), qjs::JS_TAG_UNDEFINED);
+        for v in [fun, math, max, global] {
+            qjs::JS_FreeValue(ctx, v);
+        }
     });
 }

@@ -1253,6 +1253,105 @@ typedef int JSNativeCallHook(JSContext *ctx, JSValueConst func, void *opaque);
 void JS_SetFrameHooks(JSRuntime *rt, JSFrameEnterHook *enter, JSFrameExitHook *exit,
                       void *opaque);
 void JS_SetNativeCallHook(JSRuntime *rt, JSNativeCallHook *hook, void *opaque);
+/* Servo (debugger): frames and scripts (Q47). Frames are those of the running
+   functions, innermost first, while they run; the function, script and 'this' of a
+   frame are borrowed. The script of a frame is its code (JS_TAG_FUNCTION_BYTECODE),
+   or JS_UNDEFINED for a native frame. A frame's pc is an offset in the instruction
+   it runs: the start of the instruction at a breakpoint and of the return in the
+   exit hook, a byte of the call in older frames, 0 before the first instruction.
+   'this' is the this argument as passed: not coerced for sloppy functions, and
+   undefined in derived constructors. Variables are numbered per kind as in the
+   script: the value of an uninitialized lexical variable is JS_UNINITIALIZED. The
+   getters and setters return -1 for a variable that doesn't exist, and for a
+   closure variable bound to a global that is no variable (such as an accessor
+   property), which code reads through the global object. */
+typedef struct JSStackFrame JSStackFrame;
+typedef enum JSVariableKind {
+    JS_VARIABLE_ARG,
+    JS_VARIABLE_LOCAL,
+    JS_VARIABLE_CLOSURE,
+} JSVariableKind;
+/* the binding a closure variable refers to */
+typedef enum JSBindingKind {
+    JS_BINDING_FUNCTION, /* of an enclosing function (or of the module, seen from a
+                            nested function) */
+    JS_BINDING_GLOBAL, /* global */
+    JS_BINDING_GLOBAL_DECL, /* global, declared by this code (a script or eval) */
+    JS_BINDING_MODULE, /* of the module */
+} JSBindingKind;
+typedef struct JSScriptInfo {
+    JSAtom func_name; /* borrowed */
+    int func_kind; /* 0: normal, 1: generator, 2: async, 3: async generator */
+    JS_BOOL is_toplevel; /* the code of a script, module or eval */
+    JS_BOOL is_eval; /* the code of eval() or Function() */
+    JS_BOOL is_strict;
+    JS_BOOL has_debug; /* without, there are no names or positions */
+    int line_num; /* where the function starts, 1-based */
+    int col_num;
+    uint32_t byte_code_len;
+    int arg_count;
+    int var_count;
+    int closure_var_count;
+} JSScriptInfo;
+typedef struct JSScriptVariable {
+    JSAtom name; /* borrowed, JS_ATOM_NULL if unknown */
+    JS_BOOL is_lexical;
+    JS_BOOL is_const;
+    JSBindingKind binding; /* of closure variables */
+} JSScriptVariable;
+typedef int JSScriptPositionCallback(void *opaque, uint32_t pc, int line_num, int col_num);
+typedef int JSScriptChildCallback(void *opaque, JSValueConst child);
+typedef int JSScriptOffsetCallback(void *opaque, uint32_t pc);
+JSStackFrame *JS_GetCurrentFrame(JSRuntime *rt);
+JSStackFrame *JS_GetOlderFrame(JSStackFrame *sf);
+JSValueConst JS_GetFrameFunction(JSStackFrame *sf);
+JSValueConst JS_GetFrameScript(JSStackFrame *sf);
+uint32_t JS_GetFramePC(JSStackFrame *sf);
+JSValueConst JS_GetFrameThis(JSStackFrame *sf);
+int JS_GetFrameVariable(JSContext *ctx, JSStackFrame *sf, JSVariableKind kind, int idx,
+                        JSValue *pval);
+/* consumes 'val' */
+int JS_SetFrameVariable(JSContext *ctx, JSStackFrame *sf, JSVariableKind kind, int idx,
+                        JSValue val);
+/* the code of a function written in JavaScript (borrowed), or JS_UNDEFINED */
+JSValueConst JS_GetFunctionScript(JSValueConst func);
+/* the call the instruction at 'pc' makes, with its number of arguments (-1 if
+   they are spread) */
+typedef enum JSCallKind {
+    JS_CALL_NONE,
+    JS_CALL_FUNCTION, /* f(), and spread and eval calls */
+    JS_CALL_METHOD, /* o.f() and o[k]() */
+    JS_CALL_CONSTRUCTOR, /* new F() */
+} JSCallKind;
+JSCallKind JS_GetScriptCall(JSRuntime *rt, JSValueConst script, uint32_t pc, int *pargc);
+int JS_GetScriptInfo(JSValueConst script, JSScriptInfo *info);
+int JS_GetScriptVariable(JSValueConst script, JSVariableKind kind, int idx,
+                         JSScriptVariable *var);
+/* The positions of a script: offsets where the line or column changes, in order, from
+   offset 0 (where the function starts); the last one for an offset counts. The
+   iterations stop when the callback returns non-zero, and return -1 if 'script' is
+   not a script. */
+int JS_IterateScriptPositions(JSValueConst script, JSScriptPositionCallback *cb,
+                              void *opaque);
+/* the line (1-based, 0 if unknown) and column of the instruction at 'pc' */
+int JS_GetScriptLocation(JSValueConst script, uint32_t pc, int *pcol_num);
+/* the scripts of the functions defined in a script (borrowed) */
+int JS_IterateScriptChildren(JSValueConst script, JSScriptChildCallback *cb, void *opaque);
+/* the offsets of the instructions that can change state outside the frame (not
+   counting calls): variables of other functions, global variables, properties,
+   prototypes, deletes, import(), direct eval and suspending */
+int JS_IterateScriptEffectfulOffsets(JSRuntime *rt, JSValueConst script,
+                                     JSScriptOffsetCallback *cb, void *opaque);
+/* the offsets of the backward jumps, one of which each iteration of a loop runs */
+int JS_IterateScriptLoopOffsets(JSRuntime *rt, JSValueConst script,
+                                JSScriptOffsetCallback *cb, void *opaque);
+/* the realm's eval function, whose calls by name are direct evals */
+JSValue JS_GetIntrinsicEval(JSContext *ctx);
+/* The global lexical declarations of the current realm (let, const and class at
+   the top level of scripts): their names (free with JS_FreePropertyEnum), and the
+   value of one, or -1 if there is no such declaration. */
+int JS_GetGlobalLexicalNames(JSContext *ctx, JSPropertyEnum **ptab, uint32_t *plen);
+int JS_GetGlobalLexicalVariable(JSContext *ctx, JSAtom name, JSValue *pval);
 /* Servo: host hooks. The import.meta hook populates the new import.meta object of
    'm'. The dynamic import hook replaces the module loader for import(): 'm' is
    the module of the calling code, or NULL for script code, whose host-defined

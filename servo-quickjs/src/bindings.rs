@@ -2026,6 +2026,187 @@ unsafe extern "C" {
         opaque: *mut ::std::os::raw::c_void,
     );
 }
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct JSStackFrame {
+    _unused: [u8; 0],
+}
+pub const JS_VARIABLE_ARG: JSVariableKind = 0;
+pub const JS_VARIABLE_LOCAL: JSVariableKind = 1;
+pub const JS_VARIABLE_CLOSURE: JSVariableKind = 2;
+pub type JSVariableKind = ::std::os::raw::c_uint;
+pub const JS_BINDING_FUNCTION: JSBindingKind = 0;
+pub const JS_BINDING_GLOBAL: JSBindingKind = 1;
+pub const JS_BINDING_GLOBAL_DECL: JSBindingKind = 2;
+pub const JS_BINDING_MODULE: JSBindingKind = 3;
+pub type JSBindingKind = ::std::os::raw::c_uint;
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct JSScriptInfo {
+    pub func_name: JSAtom,
+    pub func_kind: ::std::os::raw::c_int,
+    pub is_toplevel: ::std::os::raw::c_int,
+    pub is_eval: ::std::os::raw::c_int,
+    pub is_strict: ::std::os::raw::c_int,
+    pub has_debug: ::std::os::raw::c_int,
+    pub line_num: ::std::os::raw::c_int,
+    pub col_num: ::std::os::raw::c_int,
+    pub byte_code_len: u32,
+    pub arg_count: ::std::os::raw::c_int,
+    pub var_count: ::std::os::raw::c_int,
+    pub closure_var_count: ::std::os::raw::c_int,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct JSScriptVariable {
+    pub name: JSAtom,
+    pub is_lexical: ::std::os::raw::c_int,
+    pub is_const: ::std::os::raw::c_int,
+    pub binding: JSBindingKind,
+}
+impl Default for JSScriptVariable {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+pub type JSScriptPositionCallback = ::std::option::Option<
+    unsafe extern "C" fn(
+        opaque: *mut ::std::os::raw::c_void,
+        pc: u32,
+        line_num: ::std::os::raw::c_int,
+        col_num: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int,
+>;
+pub type JSScriptChildCallback = ::std::option::Option<
+    unsafe extern "C" fn(
+        opaque: *mut ::std::os::raw::c_void,
+        child: JSValue,
+    ) -> ::std::os::raw::c_int,
+>;
+pub type JSScriptOffsetCallback = ::std::option::Option<
+    unsafe extern "C" fn(opaque: *mut ::std::os::raw::c_void, pc: u32) -> ::std::os::raw::c_int,
+>;
+unsafe extern "C" {
+    pub fn JS_GetCurrentFrame(rt: *mut JSRuntime) -> *mut JSStackFrame;
+}
+unsafe extern "C" {
+    pub fn JS_GetOlderFrame(sf: *mut JSStackFrame) -> *mut JSStackFrame;
+}
+unsafe extern "C" {
+    pub fn JS_GetFrameFunction(sf: *mut JSStackFrame) -> JSValue;
+}
+unsafe extern "C" {
+    pub fn JS_GetFrameScript(sf: *mut JSStackFrame) -> JSValue;
+}
+unsafe extern "C" {
+    pub fn JS_GetFramePC(sf: *mut JSStackFrame) -> u32;
+}
+unsafe extern "C" {
+    pub fn JS_GetFrameThis(sf: *mut JSStackFrame) -> JSValue;
+}
+unsafe extern "C" {
+    pub fn JS_GetFrameVariable(
+        ctx: *mut JSContext,
+        sf: *mut JSStackFrame,
+        kind: JSVariableKind,
+        idx: ::std::os::raw::c_int,
+        pval: *mut JSValue,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn JS_SetFrameVariable(
+        ctx: *mut JSContext,
+        sf: *mut JSStackFrame,
+        kind: JSVariableKind,
+        idx: ::std::os::raw::c_int,
+        val: JSValue,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn JS_GetFunctionScript(func: JSValue) -> JSValue;
+}
+pub const JS_CALL_NONE: JSCallKind = 0;
+pub const JS_CALL_FUNCTION: JSCallKind = 1;
+pub const JS_CALL_METHOD: JSCallKind = 2;
+pub const JS_CALL_CONSTRUCTOR: JSCallKind = 3;
+pub type JSCallKind = ::std::os::raw::c_uint;
+unsafe extern "C" {
+    pub fn JS_GetScriptCall(
+        rt: *mut JSRuntime,
+        script: JSValue,
+        pc: u32,
+        pargc: *mut ::std::os::raw::c_int,
+    ) -> JSCallKind;
+}
+unsafe extern "C" {
+    pub fn JS_GetScriptInfo(script: JSValue, info: *mut JSScriptInfo) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn JS_GetScriptVariable(
+        script: JSValue,
+        kind: JSVariableKind,
+        idx: ::std::os::raw::c_int,
+        var: *mut JSScriptVariable,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn JS_IterateScriptPositions(
+        script: JSValue,
+        cb: JSScriptPositionCallback,
+        opaque: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn JS_GetScriptLocation(
+        script: JSValue,
+        pc: u32,
+        pcol_num: *mut ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn JS_IterateScriptChildren(
+        script: JSValue,
+        cb: JSScriptChildCallback,
+        opaque: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn JS_IterateScriptEffectfulOffsets(
+        rt: *mut JSRuntime,
+        script: JSValue,
+        cb: JSScriptOffsetCallback,
+        opaque: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn JS_IterateScriptLoopOffsets(
+        rt: *mut JSRuntime,
+        script: JSValue,
+        cb: JSScriptOffsetCallback,
+        opaque: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn JS_GetIntrinsicEval(ctx: *mut JSContext) -> JSValue;
+}
+unsafe extern "C" {
+    pub fn JS_GetGlobalLexicalNames(
+        ctx: *mut JSContext,
+        ptab: *mut *mut JSPropertyEnum,
+        plen: *mut u32,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn JS_GetGlobalLexicalVariable(
+        ctx: *mut JSContext,
+        name: JSAtom,
+        pval: *mut JSValue,
+    ) -> ::std::os::raw::c_int;
+}
 pub type JSImportMetaHook = ::std::option::Option<
     unsafe extern "C" fn(
         ctx: *mut JSContext,
