@@ -419,6 +419,9 @@ struct JSRuntime {
     void *frame_hook_opaque;
     JSNativeCallHook *native_call_hook;
     void *native_call_opaque;
+    /* Servo: called with the code of eval() and Function() (Q48) */
+    JSNewScriptHook *new_script_hook;
+    void *new_script_opaque;
 
     JSModuleNormalizeFunc *module_normalize_func;
     BOOL module_loader_has_attr;
@@ -809,6 +812,8 @@ typedef struct JSFunctionBytecode {
         JSAtom filename;
         int source_len; 
         int pc2line_len;
+        /* Servo: the last //# sourceURL of the source of a script's code (Q48) */
+        JSAtom source_url;
         uint8_t *pc2line_buf;
         char *source;
     } debug;
@@ -1281,6 +1286,8 @@ static JSValue JS_InvokeFree(JSContext *ctx, JSValue this_val, JSAtom atom,
                              int argc, JSValueConst *argv);
 static __exception int JS_ToArrayLengthFree(JSContext *ctx, uint32_t *plen,
                                             JSValue val, BOOL is_array_ctor);
+/* Servo: internal eval flag, the code of the Function constructor (Q48) */
+#define JS_EVAL_FLAG_FUNCTION_SOURCE (1 << 16)
 /* Servo: 'compile_kind' is the JSCompileKindEnum of the host check, -1 for none */
 static JSValue JS_EvalObject(JSContext *ctx, JSValueConst this_obj,
                              JSValueConst val, int flags, int scope_idx,
@@ -23063,6 +23070,9 @@ typedef struct JSParseState {
        (JS_EVAL_FLAG_STANDALONE_FUNCTION) */
     BOOL standalone_function;
     GetLineColCache get_line_col_cache;
+    /* Servo: the URL of the last sourceURL directive (Q48) */
+    const uint8_t *source_url;
+    int source_url_len;
 } JSParseState;
 
 typedef struct JSOpCode {
@@ -23754,6 +23764,43 @@ static JSAtom parse_ident(JSParseState *s, const uint8_t **pp,
 }
 
 
+/* Servo: a sourceURL directive at the start of a line comment or anywhere in a
+   block comment ("//# sourceURL=url", '#' or '@'), as SpiderMonkey reads them: the
+   URL ends at white space or the end of the comment, and the last non-empty one is
+   the display URL of the script (Q48) */
+static void js_parse_source_url(JSParseState *s, const uint8_t *p, BOOL block)
+{
+    static const char directive[] = " sourceURL=";
+    const uint8_t *start, *p_next;
+    int c;
+
+    if ((p[0] != '#' && p[0] != '@') ||
+        (const uint8_t *)s->buf_end - p < (ptrdiff_t)sizeof(directive) ||
+        memcmp(p + 1, directive, sizeof(directive) - 1) != 0)
+        return;
+    start = p = p + sizeof(directive);
+    while (p < s->buf_end && !(block && p[0] == '*' && p[1] == '/')) {
+        if (*p < 0x80) {
+            if (*p == '\0' || lre_is_space(*p))
+                break;
+            p++;
+        } else {
+            c = unicode_from_utf8(p, UTF8_CHAR_LEN_MAX, &p_next);
+            if (c == -1) {
+                p++;
+                continue;
+            }
+            if (lre_is_space(c))
+                break;
+            p = p_next;
+        }
+    }
+    if (p > start) {
+        s->source_url = start;
+        s->source_url_len = p - start;
+    }
+}
+
 static __exception int next_token(JSParseState *s)
 {
     const uint8_t *p;
@@ -23815,6 +23862,8 @@ static __exception int next_token(JSParseState *s)
                     js_parse_error(s, "unexpected end of comment");
                     goto fail;
                 }
+                if (*p == '#' || *p == '@')
+                    js_parse_source_url(s, p, TRUE); /* Servo (Q48) */
                 if (p[0] == '*' && p[1] == '/') {
                     p += 2;
                     break;
@@ -23837,6 +23886,7 @@ static __exception int next_token(JSParseState *s)
         } else if (p[1] == '/') {
             /* line comment */
             p += 2;
+            js_parse_source_url(s, p, FALSE); /* Servo (Q48) */
         skip_line_comment:
             for(;;) {
                 if (*p == '\0' && p >= s->buf_end)
@@ -37445,6 +37495,7 @@ static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
     JS_FreeAtomRT(rt, b->func_name);
     if (b->has_debug) {
         JS_FreeAtomRT(rt, b->debug.filename);
+        JS_FreeAtomRT(rt, b->debug.source_url); /* Servo (Q48) */
         js_free_rt(rt, b->debug.pc2line_buf);
         js_free_rt(rt, b->debug.source);
     }
@@ -38428,6 +38479,31 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
     fun_obj = js_create_function(ctx, fd);
     if (JS_IsException(fun_obj))
         goto fail1;
+    /* Servo: the display URL of the code (Q48) */
+    if (s->source_url) {
+        JSFunctionBytecode *b1 = JS_VALUE_GET_PTR(fun_obj);
+        if (b1->has_debug) {
+            b1->debug.source_url = JS_NewAtomLen(ctx, (const char *)s->source_url,
+                                                 s->source_url_len);
+            if (b1->debug.source_url == JS_ATOM_NULL) {
+                JS_FreeValue(ctx, fun_obj);
+                goto fail1;
+            }
+        }
+    }
+    /* Servo: debuggers see eval and Function code before it runs (Q48) */
+    if (ctx->rt->new_script_hook && !m &&
+        (eval_type == JS_EVAL_TYPE_DIRECT || eval_type == JS_EVAL_TYPE_INDIRECT)) {
+        if (ctx->rt->new_script_hook(ctx, fun_obj, (flags & JS_EVAL_FLAG_FUNCTION_SOURCE) != 0,
+                                     input, input_len, ctx->rt->new_script_opaque) < 0) {
+            if (!JS_HasException(ctx))
+                JS_ThrowInternalError(ctx, "debugger hook failed");
+            JS_FreeValue(ctx, fun_obj);
+            goto fail1;
+        }
+        if (JS_HasException(ctx))
+            JS_FreeValue(ctx, JS_GetException(ctx));
+    }
     /* Could add a flag to avoid resolution if necessary */
     if (m) {
         m->func_obj = fun_obj;
@@ -42384,7 +42460,8 @@ static JSValue js_function_constructor(JSContext *ctx, JSValueConst new_target,
         JS_FreeValue(ctx, s);
         goto fail1;
     }
-    obj = JS_EvalObject(ctx, ctx->global_obj, s, JS_EVAL_TYPE_INDIRECT, -1, -1);
+    obj = JS_EvalObject(ctx, ctx->global_obj, s,
+                        JS_EVAL_TYPE_INDIRECT | JS_EVAL_FLAG_FUNCTION_SOURCE, -1, -1);
     JS_FreeValue(ctx, s);
     if (JS_IsException(obj))
         goto fail1;
@@ -64415,6 +64492,22 @@ JSValue JS_GetIntrinsicEval(JSContext *ctx)
     return JS_DupValue(ctx, ctx->eval_obj);
 }
 
+/* Servo: eval and Function code for debuggers (Q48) */
+
+void JS_SetNewScriptHook(JSRuntime *rt, JSNewScriptHook *hook, void *opaque)
+{
+    rt->new_script_hook = hook;
+    rt->new_script_opaque = opaque;
+}
+
+JSAtom JS_GetScriptSourceURL(JSContext *ctx, JSValueConst script)
+{
+    JSFunctionBytecode *b = js_script_bytecode(script);
+
+    if (!b || !b->has_debug)
+        return JS_ATOM_NULL;
+    return JS_DupAtom(ctx, b->debug.source_url);
+}
 
 int JS_GetGlobalLexicalNames(JSContext *ctx, JSPropertyEnum **ptab, uint32_t *plen)
 {

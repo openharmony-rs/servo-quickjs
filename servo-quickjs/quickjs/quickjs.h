@@ -1352,6 +1352,18 @@ JSValue JS_GetIntrinsicEval(JSContext *ctx);
    value of one, or -1 if there is no such declaration. */
 int JS_GetGlobalLexicalNames(JSContext *ctx, JSPropertyEnum **ptab, uint32_t *plen);
 int JS_GetGlobalLexicalVariable(JSContext *ctx, JSAtom name, JSValue *pval);
+/* Servo (debugger): the code of eval() and Function() (Q48). The hook is called when
+   they compiled code, before it runs: 'script' is its code, 'source' its text (for
+   Function, "(function anonymous(...\n) {\n...\n})"). It returns 0, an exception it
+   leaves being dropped, or -1 for eval() or Function() to throw its exception (an
+   uncatchable one terminates) instead of running the code. JS_GetScriptSourceURL()
+   returns the URL of the last sourceURL directive ("//# sourceURL=url", in a comment)
+   of the source of the code of a script, module or eval (a new atom), or
+   JS_ATOM_NULL. */
+typedef int JSNewScriptHook(JSContext *ctx, JSValueConst script, JS_BOOL is_function,
+                            const char *source, size_t source_len, void *opaque);
+void JS_SetNewScriptHook(JSRuntime *rt, JSNewScriptHook *hook, void *opaque);
+JSAtom JS_GetScriptSourceURL(JSContext *ctx, JSValueConst script);
 /* Servo: host hooks. The import.meta hook populates the new import.meta object of
    'm'. The dynamic import hook replaces the module loader for import(): 'm' is
    the module of the calling code, or NULL for script code, whose host-defined

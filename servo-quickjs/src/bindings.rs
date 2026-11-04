@@ -2207,6 +2207,26 @@ unsafe extern "C" {
         pval: *mut JSValue,
     ) -> ::std::os::raw::c_int;
 }
+pub type JSNewScriptHook = ::std::option::Option<
+    unsafe extern "C" fn(
+        ctx: *mut JSContext,
+        script: JSValue,
+        is_function: ::std::os::raw::c_int,
+        source: *const ::std::os::raw::c_char,
+        source_len: usize,
+        opaque: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int,
+>;
+unsafe extern "C" {
+    pub fn JS_SetNewScriptHook(
+        rt: *mut JSRuntime,
+        hook: JSNewScriptHook,
+        opaque: *mut ::std::os::raw::c_void,
+    );
+}
+unsafe extern "C" {
+    pub fn JS_GetScriptSourceURL(ctx: *mut JSContext, script: JSValue) -> JSAtom;
+}
 pub type JSImportMetaHook = ::std::option::Option<
     unsafe extern "C" fn(
         ctx: *mut JSContext,

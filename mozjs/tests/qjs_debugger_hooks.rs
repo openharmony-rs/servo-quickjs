@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 //! QuickJS's debugger hooks, which the emulation of SpiderMonkey's `Debugger` builds on, through
-//! QuickJS's own API: breakpoints (Q45), frame and native call hooks (Q46), and frames and
-//! scripts (Q47).
+//! QuickJS's own API: breakpoints (Q45), frame and native call hooks (Q46), frames and scripts
+//! (Q47), and the code of eval() and Function() with sourceURL directives (Q48).
 
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, c_void};
@@ -912,6 +912,56 @@ fn loops_and_eval() {
     });
 }
 
+unsafe fn source_url(ctx: *mut qjs::JSContext, script: qjs::JSValue) -> Option<String> {
+    let atom = qjs::JS_GetScriptSourceURL(ctx, script);
+    if atom == 0 {
+        return None;
+    }
+    let name = atom_name(ctx, atom);
+    qjs::JS_FreeAtom(ctx, atom);
+    Some(name)
+}
+
+#[test]
+fn source_url_directives() {
+    with_global(|cx| unsafe {
+        let cases: [(&str, Option<&str>); 13] = [
+            (
+                "var x = 1;\n//# sourceURL=http://a/b.js\n",
+                Some("http://a/b.js"),
+            ),
+            ("//@ sourceURL=old.js\n1", Some("old.js")),
+            ("/*# sourceURL=block.js */ 1", Some("block.js")),
+            ("/*# sourceURL=end.js*/ 1", Some("end.js")),
+            (
+                "//# sourceURL=first.js\n//# sourceURL=last.js",
+                Some("last.js"),
+            ),
+            (
+                "function f() {\n//# sourceURL=nested.js\n}",
+                Some("nested.js"),
+            ),
+            ("'//# sourceURL=string.js'", None),
+            ("//#sourceURL=nospace.js\n1", None),
+            ("1", None),
+            // As SpiderMonkey: anywhere in a block comment, empty ones ignored, the URL ends at
+            // Unicode white space.
+            ("/*\n//# sourceURL=inside.js\n*/ 1", Some("inside.js")),
+            ("//# sourceURL=kept.js\n//# sourceURL=\n1", Some("kept.js")),
+            ("//# sourceURL=ls.js\u{2028}1", Some("ls.js")),
+            ("//# sourceURL=nbsp.js\u{a0}x\n1", Some("nbsp.js")),
+        ];
+        for (source, expected) in cases {
+            let script = compile(cx, source);
+            assert_eq!(
+                source_url(script_ctx(script), script_value(script)).as_deref(),
+                expected,
+                "{source:?}"
+            );
+        }
+    });
+}
+
 #[test]
 fn global_closure_variables() {
     with_global(|cx| unsafe {
@@ -1012,5 +1062,75 @@ fn calls_and_function_scripts() {
         for v in [fun, math, max, global] {
             qjs::JS_FreeValue(ctx, v);
         }
+    });
+}
+
+thread_local! {
+    static NEW_SCRIPTS: RefCell<Vec<(bool, String, Option<String>)>> = const { RefCell::new(Vec::new()) };
+}
+
+unsafe extern "C" fn on_new_script(
+    ctx: *mut qjs::JSContext,
+    script: qjs::JSValue,
+    is_function: c_int,
+    source: *const std::ffi::c_char,
+    len: usize,
+    _: *mut c_void,
+) -> c_int {
+    let text =
+        String::from_utf8_lossy(std::slice::from_raw_parts(source as *const u8, len)).into_owned();
+    let url = source_url(ctx, script);
+    let info = script_info(script);
+    assert!(info.is_toplevel != 0 && info.is_eval != 0);
+    let refuse = text == "'refused'";
+    NEW_SCRIPTS.with(|n| n.borrow_mut().push((is_function != 0, text, url)));
+    if refuse {
+        qjs::JS_ThrowTypeError(ctx, c"refused".as_ptr());
+        return -1;
+    }
+    0
+}
+
+#[test]
+fn new_script_hook() {
+    with_global(|cx| unsafe {
+        let script = compile(
+            cx,
+            "[eval('1 + 1 //# sourceURL=e.js'), new Function('return 2')(), (0, eval)('3'),
+              (function () { var local = 4; return eval('local'); })()].join()",
+        );
+        let rt = qjs::JS_GetRuntime(script_ctx(script));
+        qjs::JS_SetNewScriptHook(rt, Some(on_new_script), ptr::null_mut());
+        let result = execute(cx, script);
+        // Code the embedder compiles is not eval code.
+        let other = compile(cx, "5");
+        assert_eq!(execute(cx, other).as_deref(), Some("5"));
+        // A hook that fails throws instead of running the code.
+        let refused = compile(
+            cx,
+            "var ran = false; try { eval(\"ran = true, 'refused'\".slice(12)); } catch (e) { ran = e.message; } ran",
+        );
+        assert_eq!(execute(cx, refused).as_deref(), Some("\"refused\""));
+        NEW_SCRIPTS.with(|n| n.borrow_mut().pop());
+        qjs::JS_SetNewScriptHook(rt, None, ptr::null_mut());
+        assert_eq!(result.as_deref(), Some("\"2,2,3,4\""));
+        let scripts = NEW_SCRIPTS.with(|n| n.take());
+        assert_eq!(
+            scripts,
+            [
+                (
+                    false,
+                    "1 + 1 //# sourceURL=e.js".to_owned(),
+                    Some("e.js".to_owned())
+                ),
+                (
+                    true,
+                    "(function anonymous(\n) {\nreturn 2\n})".to_owned(),
+                    None
+                ),
+                (false, "3".to_owned(), None),
+                (false, "local".to_owned(), None),
+            ]
+        );
     });
 }
