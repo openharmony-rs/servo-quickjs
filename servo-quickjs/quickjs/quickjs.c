@@ -422,6 +422,12 @@ struct JSRuntime {
     /* Servo: called with the code of eval() and Function() (Q48) */
     JSNewScriptHook *new_script_hook;
     void *new_script_opaque;
+    /* Servo: whether the parser records statement positions, and those of the
+       scripts compiled since (Q49) */
+    BOOL debug_positions;
+    struct JSStatementPositions *statement_positions;
+    int statement_positions_count;
+    int statement_positions_size;
 
     JSModuleNormalizeFunc *module_normalize_func;
     BOOL module_loader_has_attr;
@@ -791,7 +797,8 @@ typedef struct JSFunctionBytecode {
     uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
     uint8_t has_breakpoints : 1; /* Servo: some instructions are OP_breakpoint (Q45) */
     uint8_t is_toplevel : 1; /* Servo: the code of a script, module or eval (Q47) */
-    /* XXX: 8 bits available */
+    uint8_t has_statement_positions : 1; /* Servo: in the runtime's table (Q49) */
+    /* XXX: 7 bits available */
     uint8_t *byte_code_buf; /* (self pointer) */
     int byte_code_len;
     JSAtom func_name;
@@ -2656,6 +2663,7 @@ void JS_FreeRuntime(JSRuntime *rt)
     assert(list_empty(&rt->weakref_list));
     assert(rt->breakpoint_function_count == 0);
     js_free_rt(rt, rt->breakpoint_hash);
+    js_free_rt(rt, rt->statement_positions);
 
     /* free the classes */
     for(i = 0; i < rt->class_count; i++) {
@@ -22985,6 +22993,8 @@ typedef struct JSFunctionDef {
     DynBuf byte_code;
     int last_opcode_pos; /* -1 if no last opcode */
     const uint8_t *last_opcode_source_ptr;
+    /* Servo: the byte code size after the last statement position, plus one, or 0 (Q49) */
+    int statement_pos_end;
     BOOL use_short_opcodes; /* true if short opcodes are used in byte_code */
 
     LabelSlot *label_slots;
@@ -23073,6 +23083,8 @@ typedef struct JSParseState {
     /* Servo: the URL of the last sourceURL directive (Q48) */
     const uint8_t *source_url;
     int source_url_len;
+    /* Servo: the line and column (1-based) of each statement position (Q49) */
+    DynBuf statement_positions;
 } JSParseState;
 
 typedef struct JSOpCode {
@@ -24827,16 +24839,55 @@ static void emit_u32(JSParseState *s, uint32_t val)
     dbuf_put_u32(&s->cur_func->byte_code, val);
 }
 
+/* Servo: whether only labels follow the last statement position, whose
+   instruction is still to come (Q49) */
+static BOOL statement_pos_pending(JSFunctionDef *fd)
+{
+    int pos = fd->statement_pos_end - 1;
+
+    if (pos < 0)
+        return FALSE;
+    while (pos < fd->byte_code.size) {
+        if (fd->byte_code.buf[pos] != OP_label)
+            return FALSE;
+        pos += opcode_info[OP_label].size;
+    }
+    return TRUE;
+}
+
 static void emit_source_pos(JSParseState *s, const uint8_t *source_ptr)
 {
     JSFunctionDef *fd = s->cur_func;
     DynBuf *bc = &fd->byte_code;
 
+    /* Servo: the first instruction of a statement keeps its position (Q49) */
+    if (unlikely(fd->statement_pos_end) && statement_pos_pending(fd))
+        return;
     if (unlikely(fd->last_opcode_source_ptr != source_ptr)) {
         dbuf_putc(bc, OP_line_num);
         dbuf_put_u32(bc, source_ptr - s->buf_start);
         fd->last_opcode_source_ptr = source_ptr;
     }
+}
+
+/* Servo: a statement position for debuggers (Q49): where a statement starts or a
+   function or script ends. While the runtime records them, the instruction that
+   follows gets the position, and the parser lists it. */
+static void emit_statement_pos(JSParseState *s, const uint8_t *source_ptr)
+{
+    JSFunctionDef *fd = s->cur_func;
+    int line_num, col_num;
+
+    if (!s->ctx->rt->debug_positions || fd->strip_debug)
+        return;
+    fd->statement_pos_end = 0;
+    emit_source_pos(s, source_ptr);
+    fd->statement_pos_end = fd->byte_code.size + 1;
+    if (!s->statement_positions.opaque)
+        js_dbuf_init(s->ctx, &s->statement_positions);
+    line_num = get_line_col_cached(&s->get_line_col_cache, &col_num, source_ptr);
+    dbuf_put_u32(&s->statement_positions, line_num + 1);
+    dbuf_put_u32(&s->statement_positions, col_num + 1);
 }
 
 static void emit_op(JSParseState *s, uint8_t val)
@@ -27203,6 +27254,19 @@ static __exception int js_parse_expr_paren(JSParseState *s)
     return 0;
 }
 
+/* Servo: the condition of a statement, where debuggers break (Q49) */
+static __exception int js_parse_cond_paren(JSParseState *s)
+{
+    if (js_parse_expect(s, '('))
+        return -1;
+    emit_statement_pos(s, s->token.ptr);
+    if (js_parse_expr(s))
+        return -1;
+    if (js_parse_expect(s, ')'))
+        return -1;
+    return 0;
+}
+
 static int js_unsupported_keyword(JSParseState *s, JSAtom atom)
 {
     char buf[ATOM_GET_STR_BUF_SIZE];
@@ -29547,6 +29611,7 @@ static __exception int js_parse_var(JSParseState *s, int parse_flags, int tok,
                 const uint8_t *source_ptr = s->token.ptr;
                 if (next_token(s))
                     goto var_error;
+                emit_statement_pos(s, s->token.ptr); /* Servo: the initializer (Q49) */
                 if (need_var_reference(s, tok)) {
                     /* Must make a reference for proper `with` semantics */
                     int opcode, scope, label;
@@ -29593,6 +29658,7 @@ static __exception int js_parse_var(JSParseState *s, int parse_flags, int tok,
             int skip_bits;
             if ((s->token.val == '[' || s->token.val == '{')
             &&  js_parse_skip_parens_token(s, &skip_bits, FALSE) == '=') {
+                emit_statement_pos(s, s->token.ptr); /* Servo: the pattern (Q49) */
                 emit_op(s, OP_undefined);
                 if (js_parse_destructuring_element(s, tok, 0, TRUE, skip_bits & SKIP_HAS_ELLIPSIS, TRUE, export_flag) < 0)
                     return -1;
@@ -29806,6 +29872,7 @@ static __exception int js_parse_for_in_of(JSParseState *s, int label_name,
     }
     if (next_token(s))
         return -1;
+    emit_statement_pos(s, s->token.ptr); /* Servo: the iterated object (Q49) */
     if (is_for_of) {
         if (js_parse_assign_expr(s))
             return -1;
@@ -29973,6 +30040,7 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
                 goto fail;
             }
             op_token_ptr = s->token.ptr;
+            emit_statement_pos(s, op_token_ptr); /* Servo (Q49) */
             if (next_token(s))
                 goto fail;
             if (s->token.val != ';' && s->token.val != '}' && !s->got_lf) {
@@ -29992,6 +30060,7 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
         {
             const uint8_t *op_token_ptr;
             op_token_ptr = s->token.ptr;
+            emit_statement_pos(s, op_token_ptr); /* Servo (Q49) */
             if (next_token(s))
                 goto fail;
             if (s->got_lf) {
@@ -30030,7 +30099,7 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
             /* create a new scope for `let f;if(1) function f(){}` */
             push_scope(s);
             set_eval_ret_undefined(s);
-            if (js_parse_expr_paren(s))
+            if (js_parse_cond_paren(s)) /* Servo (Q49) */
                 goto fail;
             label1 = emit_goto(s, OP_if_false, -1);
             if (s->cur_func->js_mode & JS_MODE_STRICT)
@@ -30073,7 +30142,7 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
             set_eval_ret_undefined(s);
 
             emit_label(s, label_cont);
-            if (js_parse_expr_paren(s))
+            if (js_parse_cond_paren(s)) /* Servo (Q49) */
                 goto fail;
             emit_goto(s, OP_if_false, label_break);
 
@@ -30111,7 +30180,7 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
             emit_label(s, label_cont);
             if (js_parse_expect(s, TOK_WHILE))
                 goto fail;
-            if (js_parse_expr_paren(s))
+            if (js_parse_cond_paren(s)) /* Servo (Q49) */
                 goto fail;
             /* Insert semicolon if missing */
             if (s->token.val == ';') {
@@ -30183,6 +30252,7 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
                     if (js_parse_var(s, FALSE, tok, FALSE))
                         goto fail;
                 } else {
+                    emit_statement_pos(s, s->token.ptr); /* Servo (Q49) */
                     if (js_parse_expr2(s, FALSE))
                         goto fail;
                     emit_op(s, OP_drop);
@@ -30208,6 +30278,7 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
                 label_test = label_body;
             } else {
                 emit_label(s, label_test);
+                emit_statement_pos(s, s->token.ptr); /* Servo (Q49) */
                 if (js_parse_expr(s))
                     goto fail;
                 emit_goto(s, OP_if_false, label_break);
@@ -30225,6 +30296,7 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
 
                 pos_cont = s->cur_func->byte_code.size;
                 emit_label(s, label_cont);
+                emit_statement_pos(s, s->token.ptr); /* Servo (Q49) */
                 if (js_parse_expr(s))
                     goto fail;
                 emit_op(s, OP_drop);
@@ -30277,6 +30349,7 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
             int is_cont = s->token.val - TOK_BREAK;
             int label;
 
+            emit_statement_pos(s, s->token.ptr); /* Servo (Q49) */
             if (next_token(s))
                 goto fail;
             if (!s->got_lf && s->token.val == TOK_IDENT && !s->token.u.ident.is_reserved)
@@ -30303,7 +30376,7 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
                 goto fail;
 
             set_eval_ret_undefined(s);
-            if (js_parse_expr_paren(s))
+            if (js_parse_cond_paren(s)) /* Servo (Q49) */
                 goto fail;
 
             push_scope(s);
@@ -30562,7 +30635,7 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
             if (next_token(s))
                 goto fail;
 
-            if (js_parse_expr_paren(s))
+            if (js_parse_cond_paren(s)) /* Servo (Q49) */
                 goto fail;
 
             push_scope(s);
@@ -30646,6 +30719,7 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
     default:
     hasexpr:
         emit_source_pos(s, s->token.ptr);
+        emit_statement_pos(s, s->token.ptr); /* Servo (Q49) */
         if (js_parse_expr(s))
             goto fail;
         if (s->cur_func->eval_ret_idx >= 0) {
@@ -37457,6 +37531,36 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     return JS_EXCEPTION;
 }
 
+/* Servo: the statement positions of the code of a script (Q49) */
+typedef struct JSStatementPositions {
+    JSFunctionBytecode *b;
+    uint32_t *tab; /* line and column pairs, 1-based */
+    int count; /* pairs */
+} JSStatementPositions;
+
+static JSStatementPositions *js_find_statement_positions(JSRuntime *rt,
+                                                         JSFunctionBytecode *b)
+{
+    int i;
+
+    for(i = 0; i < rt->statement_positions_count; i++) {
+        if (rt->statement_positions[i].b == b)
+            return &rt->statement_positions[i];
+    }
+    return NULL;
+}
+
+static void js_free_statement_positions(JSRuntime *rt, JSFunctionBytecode *b)
+{
+    JSStatementPositions *sp = js_find_statement_positions(rt, b);
+
+    if (sp) {
+        js_free_rt(rt, sp->tab);
+        *sp = rt->statement_positions[--rt->statement_positions_count];
+    }
+    b->has_statement_positions = FALSE;
+}
+
 static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
 {
     int i;
@@ -37473,6 +37577,8 @@ static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
         js_free_breakpoints(rt, b);
     if (rt->insn_walk_b == b)
         rt->insn_walk_b = NULL;
+    if (b->has_statement_positions)
+        js_free_statement_positions(rt, b);
     if (b->byte_code_buf)
         free_bytecode_atoms(rt, b->byte_code_buf, b->byte_code_len, TRUE);
 
@@ -37695,6 +37801,7 @@ static __exception int js_parse_function_decl2(JSParseState *s,
     int func_idx, lexical_func_idx = -1;
     BOOL has_opt_arg;
     BOOL create_func_var = FALSE;
+    const uint8_t *end_ptr;
 
     is_expr = (func_type != JS_PARSE_FUNC_STATEMENT &&
                func_type != JS_PARSE_FUNC_VAR);
@@ -38122,6 +38229,7 @@ static __exception int js_parse_function_decl2(JSParseState *s,
             goto fail;
     }
 
+    end_ptr = s->token.ptr; /* Servo (Q49) */
     if (next_token(s)) {
         /* consume the '}' */
         goto fail;
@@ -38129,6 +38237,7 @@ static __exception int js_parse_function_decl2(JSParseState *s,
 
     /* in case there is no return, add one */
     if (js_is_live_code(s)) {
+        emit_statement_pos(s, end_ptr); /* Servo: the closing brace (Q49) */
         emit_return(s, FALSE);
     }
  done:
@@ -38287,6 +38396,7 @@ static __exception int js_parse_program(JSParseState *s)
             return -1;
     }
 
+    emit_statement_pos(s, s->token.ptr); /* Servo: the end of the script (Q49) */
     if (!s->is_module) {
         /* return the value of the hidden variable eval_ret_idx  */
         if (fd->func_kind == JS_FUNC_ASYNC) {
@@ -38491,6 +38601,26 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
             }
         }
     }
+    /* Servo: the statement positions of the code (Q49) */
+    if (s->statement_positions.size) {
+        JSRuntime *rt = ctx->rt;
+        JSFunctionBytecode *b1 = JS_VALUE_GET_PTR(fun_obj);
+        JSStatementPositions *sp;
+        if (js_resize_array(ctx, (void **)&rt->statement_positions,
+                            sizeof(rt->statement_positions[0]),
+                            &rt->statement_positions_size,
+                            rt->statement_positions_count + 1)) {
+            JS_FreeValue(ctx, fun_obj);
+            goto fail1;
+        }
+        sp = &rt->statement_positions[rt->statement_positions_count++];
+        sp->b = b1;
+        sp->count = s->statement_positions.size / (2 * sizeof(uint32_t));
+        sp->tab = (uint32_t *)s->statement_positions.buf;
+        s->statement_positions.buf = NULL;
+        s->statement_positions.size = 0;
+        b1->has_statement_positions = TRUE;
+    }
     /* Servo: debuggers see eval and Function code before it runs (Q48) */
     if (ctx->rt->new_script_hook && !m &&
         (eval_type == JS_EVAL_TYPE_DIRECT || eval_type == JS_EVAL_TYPE_INDIRECT)) {
@@ -38512,6 +38642,7 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
             goto fail1;
         fun_obj = JS_NewModuleValue(ctx, m);
     }
+    dbuf_free(&s->statement_positions); /* Servo (Q49) */
     if (flags & JS_EVAL_FLAG_COMPILE_ONLY) {
         ret_val = fun_obj;
     } else {
@@ -38519,6 +38650,7 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
     }
     return ret_val;
  fail1:
+    dbuf_free(&s->statement_positions); /* Servo (Q49) */
     /* XXX: should free all the unresolved dependencies */
     if (m)
         JS_FreeValue(ctx, JS_MKPTR(JS_TAG_MODULE, m));
@@ -64507,6 +64639,28 @@ JSAtom JS_GetScriptSourceURL(JSContext *ctx, JSValueConst script)
     if (!b || !b->has_debug)
         return JS_ATOM_NULL;
     return JS_DupAtom(ctx, b->debug.source_url);
+}
+
+/* Servo: statement positions for debuggers (Q49) */
+
+void JS_SetDebuggerPositions(JSRuntime *rt, JS_BOOL enable)
+{
+    rt->debug_positions = enable;
+}
+
+int JS_GetScriptStatementPositions(JSRuntime *rt, JSValueConst script, const uint32_t **ptab)
+{
+    JSFunctionBytecode *b = js_script_bytecode(script);
+    JSStatementPositions *sp;
+
+    *ptab = NULL;
+    if (!b || !b->has_statement_positions)
+        return -1;
+    sp = js_find_statement_positions(rt, b);
+    if (!sp)
+        return -1;
+    *ptab = sp->tab;
+    return sp->count;
 }
 
 int JS_GetGlobalLexicalNames(JSContext *ctx, JSPropertyEnum **ptab, uint32_t *plen)

@@ -2227,6 +2227,16 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn JS_GetScriptSourceURL(ctx: *mut JSContext, script: JSValue) -> JSAtom;
 }
+unsafe extern "C" {
+    pub fn JS_SetDebuggerPositions(rt: *mut JSRuntime, enable: ::std::os::raw::c_int);
+}
+unsafe extern "C" {
+    pub fn JS_GetScriptStatementPositions(
+        rt: *mut JSRuntime,
+        script: JSValue,
+        ptab: *mut *const u32,
+    ) -> ::std::os::raw::c_int;
+}
 pub type JSImportMetaHook = ::std::option::Option<
     unsafe extern "C" fn(
         ctx: *mut JSContext,

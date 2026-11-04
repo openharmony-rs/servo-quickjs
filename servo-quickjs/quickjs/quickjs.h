@@ -1364,6 +1364,20 @@ typedef int JSNewScriptHook(JSContext *ctx, JSValueConst script, JS_BOOL is_func
                             const char *source, size_t source_len, void *opaque);
 void JS_SetNewScriptHook(JSRuntime *rt, JSNewScriptHook *hook, void *opaque);
 JSAtom JS_GetScriptSourceURL(JSContext *ctx, JSValueConst script);
+/* Servo (debugger): statement positions (Q49), where SpiderMonkey's debuggers
+   step. While enabled, the parser gives a position (see JS_IterateScriptPositions())
+   to the first instruction of: expression statements; return, throw, break and
+   continue statements; each initializer of a declaration (the pattern of a
+   destructuring one); the conditions of if, while, do-while and switch
+   statements, the object of with statements, the initialization, condition and
+   update of for statements and the object of for-in and for-of statements; and of
+   the implicit return at the closing brace of a function and at the end of a
+   script. Not when there is no instruction or it is dead code. The code of the
+   script, module or eval lists them all for its whole source: line and column
+   pairs, 1-based, in source order, until it is freed (so read them before it
+   runs). The getter returns their number (-1 if none were recorded). */
+void JS_SetDebuggerPositions(JSRuntime *rt, JS_BOOL enable);
+int JS_GetScriptStatementPositions(JSRuntime *rt, JSValueConst script, const uint32_t **ptab);
 /* Servo: host hooks. The import.meta hook populates the new import.meta object of
    'm'. The dynamic import hook replaces the module loader for import(): 'm' is
    the module of the calling code, or NULL for script code, whose host-defined

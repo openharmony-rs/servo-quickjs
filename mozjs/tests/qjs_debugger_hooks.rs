@@ -4,7 +4,8 @@
 
 //! QuickJS's debugger hooks, which the emulation of SpiderMonkey's `Debugger` builds on, through
 //! QuickJS's own API: breakpoints (Q45), frame and native call hooks (Q46), frames and scripts
-//! (Q47), and the code of eval() and Function() with sourceURL directives (Q48).
+//! (Q47), the code of eval() and Function() with sourceURL directives (Q48), and statement
+//! positions (Q49).
 
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, c_void};
@@ -1132,5 +1133,123 @@ fn new_script_hook() {
                 (false, "local".to_owned(), None),
             ]
         );
+    });
+}
+
+unsafe fn statement_positions(
+    rt: *mut qjs::JSRuntime,
+    script: qjs::JSValue,
+) -> Option<Vec<(u32, u32)>> {
+    let mut tab = ptr::null();
+    let n = qjs::JS_GetScriptStatementPositions(rt, script, &mut tab);
+    if n < 0 {
+        return None;
+    }
+    Some(
+        (0..n as usize)
+            .map(|i| (*tab.add(2 * i), *tab.add(2 * i + 1)))
+            .collect(),
+    )
+}
+
+const STEPPING: &str = "
+function end() {
+    console.log('end');
+    let a = 1;
+}
+var console = { log() {} };
+end();
+";
+
+#[test]
+fn statement_positions_for_debuggers() {
+    with_global(|cx| unsafe {
+        let plain = compile(cx, STEPPING);
+        let rt = qjs::JS_GetRuntime(script_ctx(plain));
+        assert_eq!(
+            statement_positions(rt, script_value(plain)),
+            None,
+            "not recorded by default"
+        );
+
+        qjs::JS_SetDebuggerPositions(rt, 1);
+        let script = compile(cx, STEPPING);
+        qjs::JS_SetDebuggerPositions(rt, 0);
+        let top = script_value(script);
+        // Statements (declarations at their initializers), the closing braces of `end` and of
+        // the method `log`, and the end of the script, in source order; not the function
+        // declaration.
+        assert_eq!(
+            statement_positions(rt, top).unwrap(),
+            [(3, 5), (4, 13), (5, 1), (6, 15), (6, 24), (7, 1), (8, 1)]
+        );
+        let end = children(top)[0];
+        let pos = positions(end);
+        for (line, col) in [(3, 5), (4, 13), (5, 1)] {
+            assert!(
+                pos.iter().any(|p| p.1 == line && p.2 == col as i32),
+                "a position at {line}:{col} in {pos:?}"
+            );
+        }
+        let top_pos = positions(top);
+        assert!(
+            top_pos.iter().any(|p| p.1 == 8 && p.2 == 1),
+            "the end of the script"
+        );
+        assert_eq!(execute(cx, script), execute(cx, plain), "the same result");
+
+        // The first instruction of a statement has the statement's position, not that of its
+        // first expression.
+        qjs::JS_SetDebuggerPositions(rt, 1);
+        let script = compile(
+            cx,
+            "function g(a, b) {\n  let sum = a + b;\n  const t = q.r;\n  return sum;\n}\n\
+             async function h() {}\nvar x;\n",
+        );
+        qjs::JS_SetDebuggerPositions(rt, 0);
+        let top = script_value(script);
+        assert_eq!(
+            statement_positions(rt, top).unwrap(),
+            [(2, 13), (3, 13), (4, 3), (6, 21), (8, 1)],
+            "not function declarations, declarations without initializer or dead code"
+        );
+        let pos = positions(children(top)[0]);
+        for (line, col) in [(2, 13), (3, 13), (4, 3)] {
+            assert!(
+                pos.iter().any(|p| p.1 == line && p.2 == col as i32),
+                "a position at {line}:{col} in {pos:?}"
+            );
+        }
+
+        // Conditions, loop heads and jumps, as SpiderMonkey.
+        qjs::JS_SetDebuggerPositions(rt, 1);
+        let script = compile(
+            cx,
+            "function loops(n) {\n  for (let i = 0; i < n; i++) {\n    if (i === 2) break;\n  }\n\
+             \x20 while (n > 0) n--;\n  for (const k of [1]) {}\n  switch (n) { default: throw 1; }\n}\n",
+        );
+        qjs::JS_SetDebuggerPositions(rt, 0);
+        let top = script_value(script);
+        let expected: [(u32, u32); 10] = [
+            (2, 16),
+            (2, 19),
+            (2, 26),
+            (3, 9),
+            (3, 18),
+            (5, 10),
+            (5, 17),
+            (6, 19),
+            (7, 11),
+            (7, 25),
+        ];
+        let listed = statement_positions(rt, top).unwrap();
+        assert_eq!(&listed[..expected.len()], expected);
+        let pos = positions(children(top)[0]);
+        for (line, col) in expected {
+            assert!(
+                pos.iter().any(|p| p.1 == line as i32 && p.2 == col as i32),
+                "a position at {line}:{col} in {pos:?}"
+            );
+        }
     });
 }
