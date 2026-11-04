@@ -26,6 +26,7 @@ mod atom;
 mod buffer;
 mod class;
 mod clone;
+mod debugger;
 mod error;
 mod eval;
 mod exception;
@@ -50,6 +51,7 @@ pub(crate) use atom::*;
 pub(crate) use buffer::*;
 pub(crate) use class::*;
 pub(crate) use clone::*;
+pub(crate) use debugger::*;
 pub(crate) use error::*;
 pub(crate) use eval::*;
 pub(crate) use exception::*;
@@ -83,6 +85,8 @@ pub(crate) struct Cx {
     pub hooks: promise::RuntimeHooks,
     /// The key object of `base_ctx` (counted), for intrinsics outside any realm.
     pub base_key_object: Cell<q::JSValue>,
+    /// The emulations of SpiderMonkey's `Debugger` (see `debugger.rs`).
+    pub debugger: debugger::State,
 }
 
 /// What a SpiderMonkey `JS::Realm*` (and `JS::Compartment*`) points to. Owned by its QuickJS

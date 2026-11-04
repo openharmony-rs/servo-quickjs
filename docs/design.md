@@ -184,6 +184,16 @@ As SpiderMonkey does for web compatibility, formatted dates and times have U+002
 - Implemented: `Intl.NumberFormat`, `Intl.DateTimeFormat` (styles and component options), `Intl.Collator`, the `toLocale*String` methods, `localeCompare` and locale-aware case mapping.
 - Missing: `Intl.PluralRules`, `RelativeTimeFormat`, `ListFormat`, `DisplayNames`, `Segmenter`, `Locale` and `formatRange`.
 
+## Debugger
+
+`JS_DefineDebuggerObject` installs an emulation of SpiderMonkey's `Debugger` API, the subset that Servo's devtools (`debugger.js`) use: `engine/debugger_api.js`, evaluated in the debugger global over natives from `engine/debugger.rs`. `debugger.js`, the actors and the protocol are those of SpiderMonkey builds.
+
+- There are no compartments: debuggee values are QuickJS values of other realms, which the emulation reaches directly. Each `Debugger` has one `Debugger.Object` per referent, `Debugger.Script` per script and `Debugger.Source` per source while they live; QuickJS's WeakMaps are not ephemerons, so the maps hold them through WeakRefs. The emulation uses the intrinsics it captured when it was installed, and calls debuggee functions and evaluates code only through natives that return a completion (`{return}`, `{throw}`, or `null` for a termination, which the debugger survives). Inspecting a JS Proxy runs its traps, as in SpiderMonkey.
+- Debuggees are globals, also designated by their WindowProxy. `class` is that of the QuickJS class, or for the shim's proxies that of the handler's `className` trap (a WindowProxy's is its window's).
+- `onNewScript`: the shim tells each emulation about the code of every classic script, module and event handler it compiles (`new_script`), with its source text, URL and `introductionType`, before the code runs. Servo installs the emulation in every script thread with the `devtools` feature, but only adds debuggees while the devtools server runs; until a debugger has a debuggee, compiling does nothing more. Otherwise `Evaluate` compiles and runs separately. A hook that is terminated requests the interrupt again, so the script it interrupted is terminated too.
+- `executeInGlobal` compiles in the debuggee's realm as a classic script (introduction type "debugger eval", URL "debugger eval code"), so global `let` bindings persist across evaluations.
+- Not yet: frames, breakpoints and stepping, scripts of functions and of eval code, `displayURL`, global lexical bindings in `asEnvironment`, and code that must have no side effects (`shouldAvoidSideEffects`), which isn't run.
+
 ## QuickJS patches
 
 `servo-quickjs/quickjs` is Bellard's QuickJS at the commit in `servo-quickjs/quickjs/UPSTREAM`, patched locally. Each patch is marked with a `/* Servo: ... */` comment and committed separately with a `quickjs:` prefix.
@@ -242,6 +252,6 @@ As SpiderMonkey does for web compatibility, formatted dates and times have U+002
 
 ## Not supported
 
-`Debugger` / devtools, WebAssembly, SharedArrayBuffer (already disabled in Servo), JIT options, and GC zeal.
+WebAssembly, SharedArrayBuffer (already disabled in Servo), JIT options, and GC zeal.
 Explicit resource management: QuickJS has no `Symbol.dispose` and `Symbol.asyncDispose`, so `GetWellKnownSymbol` returns null for them.
 `JS_SetGCParameter` is a no-op. `AddAssociatedMemory`/`RemoveAssociatedMemory` have a GC trigger of their own (patch Q43), like SpiderMonkey's malloc threshold with its default parameters: a collection runs when the reported memory exceeds what the last one left, or 38 MiB, times 1.5, or up to 3 when collections come less than a second apart (SpiderMonkey's high-frequency heap growth). Servo reports the size of every DOM object and canvas bitmap, which a collection frees with their reflectors.

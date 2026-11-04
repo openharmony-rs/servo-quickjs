@@ -16,7 +16,7 @@ use std::sync::atomic::{fence, AtomicUsize, Ordering};
 
 use servo_quickjs as q;
 
-use super::eval::{eval, options, source_buffer, CompileOptions};
+use super::eval::{eval, options, source_buffer, units, CompileOptions};
 use super::exception::throw_error;
 use super::Cx;
 use crate::sys::jsapi as root;
@@ -26,6 +26,14 @@ struct Stencil {
     refs: AtomicUsize,
     bytecode: Box<[u8]>,
     muted_errors: bool,
+    /// What debuggers are told about the script when it is instantiated.
+    source: ScriptSource,
+}
+
+struct ScriptSource {
+    url: CString,
+    text: Box<[u8]>,
+    introduction_type: Option<&'static CStr>,
 }
 
 /// What a `JS::FrontendContext*` points to.
@@ -110,6 +118,13 @@ pub(crate) unsafe fn CompileGlobalScriptToStencil_C(
             refs: AtomicUsize::new(1),
             bytecode,
             muted_errors: options.base._base.mutedErrors_,
+            source: ScriptSource {
+                url: options.filename.clone(),
+                text: units(srcBuf).into(),
+                // Introduction types are static strings.
+                introduction_type: (!options.base._base.introductionType.is_null())
+                    .then(|| CStr::from_ptr(options.base._base.introductionType)),
+            },
         })) as *mut root::JS::Stencil,
         Err(error) => {
             fc.failed = Some(FailedCompilation { source, error });
@@ -241,6 +256,14 @@ pub(crate) unsafe fn InstantiateGlobalStencil(
     if q::JS_IsException(script) != 0 {
         return ptr::null_mut();
     }
+    let source = &stencil.source;
+    super::new_script(
+        cx,
+        script,
+        &source.url,
+        &source.text,
+        source.introduction_type.map_or(ptr::null(), CStr::as_ptr),
+    );
     cx.adopt(script).asBits_ as usize as *mut root::JSScript
 }
 

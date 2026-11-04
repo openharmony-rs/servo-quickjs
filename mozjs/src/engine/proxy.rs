@@ -23,7 +23,7 @@
 //! loops, see the design doc.
 
 use std::cell::{Cell, RefCell};
-use std::ffi::{c_int, c_uint, c_void, CString};
+use std::ffi::{c_char, c_int, c_uint, c_void, CString};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::OnceLock;
@@ -231,6 +231,28 @@ unsafe fn proxy_handler<'a>(obj: *mut root::JSObject) -> Option<&'a ProxyHandler
 /// The class `obj` was created with, if it is a proxy.
 pub(crate) unsafe fn proxy_class(obj: *mut root::JSObject) -> Option<*const root::JSClass> {
     proxy_data(obj).map(|data| data.clasp)
+}
+
+/// The class name of a proxy, as SpiderMonkey's `js::Proxy::className`: that of the handler's
+/// `className` trap, else the target's for forwarding and wrapper handlers, else the class's. `None`
+/// if `obj` is not a proxy of the shim.
+pub(crate) unsafe fn proxy_class_name(cx: &Cx, obj: *mut root::JSObject) -> Option<*const c_char> {
+    let data = proxy_data(obj)?;
+    let handler = &*data.handler;
+    if let Some(class_name) = handler.traps.className {
+        let rooted = obj;
+        return Some(class_name(cx.as_raw(), handle(&rooted)));
+    }
+    if matches!(handler.kind, Kind::Forwarding | Kind::Wrapper) {
+        let target = data.private.get();
+        if target.tag() == q::JS_TAG_OBJECT {
+            return Some(
+                proxy_class_name(cx, val_obj(target))
+                    .unwrap_or_else(|| (*super::class::object_class(val_obj(target))).name),
+            );
+        }
+    }
+    Some((*data.clasp).name)
 }
 
 pub(crate) unsafe fn proxy_realm(obj: *mut root::JSObject) -> Option<*mut RealmData> {

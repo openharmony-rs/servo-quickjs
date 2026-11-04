@@ -27,7 +27,7 @@ use std::sync::OnceLock;
 
 use servo_quickjs as q;
 
-use super::eval::{options, padded, source_buffer, utf16_source};
+use super::eval::{options, padded, source_buffer, units, utf16_source, CompileOptions};
 use super::{adopt_object, obj_val, val_obj, Cx, RealmData};
 use crate::sys::jsapi as root;
 use crate::sys::jsval::JSVal;
@@ -446,17 +446,36 @@ unsafe fn module_request(cx: &Cx, module: *mut root::JSObject, idx: usize) -> *m
 
 // Compilation.
 
-unsafe fn compile_module(cx: &Cx, filename: &CStr, src: &[u8]) -> *mut root::JSObject {
+/// Compiles a JavaScript module. With a debugger, it is told about the module's code (`text` is its
+/// source).
+unsafe fn compile_module(
+    cx: &Cx,
+    options: &CompileOptions,
+    src: &[u8],
+    text: &[u8],
+) -> *mut root::JSObject {
     let flags = q::JS_EVAL_TYPE_MODULE | q::JS_EVAL_FLAG_COMPILE_ONLY | q::JS_EVAL_FLAG_NO_RESOLVE;
+    let qctx = cx.qctx();
     let module = q::JS_Eval(
-        cx.qctx(),
+        qctx,
         src.as_ptr() as *const c_char,
         src.len() - 1,
-        filename.as_ptr(),
+        options.filename.as_ptr(),
         flags as c_int,
     );
     if module.tag() == q::JS_TAG_EXCEPTION {
         return ptr::null_mut();
+    }
+    if cx.debugger.is_active() {
+        let code = q::JS_GetModuleScript(qctx, module.ptr() as *mut q::JSModuleDef);
+        super::new_script(
+            cx,
+            code,
+            &options.filename,
+            text,
+            options.base._base.introductionType,
+        );
+        q::JS_FreeValue(qctx, code);
     }
     new_module_object(cx, module, ModuleKind::JavaScript)
 }
@@ -518,7 +537,7 @@ pub(crate) unsafe fn CompileModule1(
         (*srcBuf).units_ as *const u8,
         (*srcBuf).length_ as usize,
     );
-    compile_module(cx, &options.filename, &src)
+    compile_module(cx, options, &src, units(srcBuf))
 }
 
 pub(crate) unsafe fn CompileModule(
@@ -528,8 +547,14 @@ pub(crate) unsafe fn CompileModule(
 ) -> *mut root::JSObject {
     let cx = Cx::from_raw(cx);
     let options = self::options(options);
-    let src = padded(options.base.lineno, &utf16_source(srcBuf));
-    compile_module(cx, &options.filename, &src)
+    let text = utf16_source(srcBuf);
+    let src = padded(options.base.lineno, &text);
+    let text = if cx.debugger.is_active() {
+        text
+    } else {
+        String::new()
+    };
+    compile_module(cx, options, &src, text.as_bytes())
 }
 
 pub(crate) unsafe fn CompileJsonModule1(
