@@ -1228,6 +1228,31 @@ typedef int JSBreakpointHandler(JSContext *ctx, JSValueConst script, uint32_t pc
 void JS_SetBreakpointHandler(JSRuntime *rt, JSBreakpointHandler *handler, void *opaque);
 int JS_SetBreakpoint(JSContext *ctx, JSValueConst script, uint32_t pc);
 int JS_ClearBreakpoint(JSRuntime *rt, JSValueConst script, uint32_t pc);
+/* Servo (debugger): hooks (Q46). The enter hook is called when the frame of a
+   bytecode function starts or resumes (a generator or async function), as the
+   current frame, before its next instruction; it returns 0, or -1 to throw its
+   exception there instead. The exit hook is called when the current bytecode frame
+   stops: it returned 'value', threw 'value', was terminated (an uncatchable
+   exception), or suspended (a yield or await) with 'value'; it returns 0, an
+   exception it leaves being dropped, or -1 for the frame to throw its exception
+   instead (an uncatchable one terminates). The native call hook is called before
+   a native function or constructor runs (not for bytecode functions, generators,
+   async functions, bound functions or proxies), and returns 0, or -1 to throw its
+   exception instead. A pending exception is put aside while the enter and exit
+   hooks run. */
+typedef enum JSFrameExitKind {
+    JS_FRAME_EXIT_RETURN,
+    JS_FRAME_EXIT_THROW,
+    JS_FRAME_EXIT_TERMINATE,
+    JS_FRAME_EXIT_SUSPEND,
+} JSFrameExitKind;
+typedef int JSFrameEnterHook(JSContext *ctx, void *opaque);
+typedef int JSFrameExitHook(JSContext *ctx, JSFrameExitKind kind, JSValueConst value,
+                            void *opaque);
+typedef int JSNativeCallHook(JSContext *ctx, JSValueConst func, void *opaque);
+void JS_SetFrameHooks(JSRuntime *rt, JSFrameEnterHook *enter, JSFrameExitHook *exit,
+                      void *opaque);
+void JS_SetNativeCallHook(JSRuntime *rt, JSNativeCallHook *hook, void *opaque);
 /* Servo: host hooks. The import.meta hook populates the new import.meta object of
    'm'. The dynamic import hook replaces the module loader for import(): 'm' is
    the module of the calling code, or NULL for script code, whose host-defined

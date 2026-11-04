@@ -3,16 +3,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 //! QuickJS's debugger hooks, which the emulation of SpiderMonkey's `Debugger` builds on, through
-//! QuickJS's own API: breakpoints (Q45).
+//! QuickJS's own API: breakpoints (Q45), and frame and native call hooks (Q46).
 
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, c_void};
 use std::ptr::{self, NonNull};
 use std::sync::OnceLock;
 
-use mozjs::context::JSContext;
+use mozjs::context::{JSContext, RawJSContext};
 use mozjs::conversions::jsstr_to_string;
-use mozjs::jsapi::{self, JSScript, OnNewGlobalHookOption};
+use mozjs::jsapi::{self, JSScript, OnNewGlobalHookOption, Value};
 use mozjs::jsval::UndefinedValue;
 use mozjs::qjs;
 use mozjs::realm::AutoRealm;
@@ -222,5 +222,290 @@ fn many_breakpoints() {
         assert_eq!(execute(cx, big).as_deref(), Some("31996000"));
         assert!(hits().is_empty());
         unsafe { qjs::JS_SetBreakpointHandler(rt, None, ptr::null_mut()) };
+    });
+}
+
+thread_local! {
+    static EVENTS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static ENTERS: Cell<usize> = const { Cell::new(0) };
+    static THROW_ON_ENTER: Cell<usize> = const { Cell::new(0) };
+    static CLOBBER: Cell<bool> = const { Cell::new(false) };
+    static IN_HOOK: Cell<bool> = const { Cell::new(false) };
+    static FAIL_EXIT: Cell<u8> = const { Cell::new(0) };
+}
+
+fn events() -> Vec<String> {
+    EVENTS.with(|e| e.take())
+}
+
+unsafe fn describe(ctx: *mut qjs::JSContext, v: qjs::JSValue) -> String {
+    if v.tag() == qjs::JS_TAG_INT {
+        return v.int().to_string();
+    }
+    let s = qjs::JS_ToCStringLen(ctx, ptr::null_mut(), v);
+    if s.is_null() {
+        qjs::JS_FreeValue(ctx, qjs::JS_GetException(ctx));
+        return "?".to_owned();
+    }
+    let r = std::ffi::CStr::from_ptr(s).to_string_lossy().into_owned();
+    qjs::JS_FreeCString(ctx, s);
+    r
+}
+
+unsafe extern "C" fn on_enter(ctx: *mut qjs::JSContext, _: *mut c_void) -> c_int {
+    if IN_HOOK.with(Cell::get) {
+        return 0;
+    }
+    EVENTS.with(|e| e.borrow_mut().push("enter".to_owned()));
+    let n = ENTERS.with(|c| {
+        c.set(c.get() + 1);
+        c.get()
+    });
+    if THROW_ON_ENTER.with(Cell::get) == n {
+        qjs::JS_ThrowTypeError(ctx, c"enter".as_ptr());
+        return -1;
+    }
+    0
+}
+
+unsafe extern "C" fn on_exit(
+    ctx: *mut qjs::JSContext,
+    kind: qjs::JSFrameExitKind,
+    value: qjs::JSValue,
+    _: *mut c_void,
+) -> c_int {
+    if IN_HOOK.with(Cell::get) {
+        return 0;
+    }
+    let event = match kind {
+        qjs::JS_FRAME_EXIT_RETURN => format!("return:{}", describe(ctx, value)),
+        qjs::JS_FRAME_EXIT_THROW => format!("throw:{}", describe(ctx, value)),
+        qjs::JS_FRAME_EXIT_TERMINATE => "terminate".to_owned(),
+        _ => format!("suspend:{}", describe(ctx, value)),
+    };
+    EVENTS.with(|e| e.borrow_mut().push(event));
+    if CLOBBER.with(Cell::get) {
+        // Script that throws and catches, and an exception left behind, while one is pending.
+        IN_HOOK.with(|h| h.set(true));
+        let src = c"try { throw 1; } catch (e) {}";
+        let v = qjs::JS_Eval(ctx, src.as_ptr(), src.count_bytes(), c"hook.js".as_ptr(), 0);
+        qjs::JS_FreeValue(ctx, v);
+        qjs::JS_ThrowRangeError(ctx, c"left by the hook".as_ptr());
+        IN_HOOK.with(|h| h.set(false));
+    }
+    // The frame of `f` throws, or is terminated, instead.
+    match FAIL_EXIT.with(Cell::get) {
+        1 if kind == qjs::JS_FRAME_EXIT_RETURN && describe(ctx, value) == "2" => {
+            qjs::JS_ThrowTypeError(ctx, c"exit".as_ptr());
+            -1
+        }
+        2 if kind == qjs::JS_FRAME_EXIT_RETURN && describe(ctx, value) == "2" => {
+            qjs::JS_ThrowInternalError(ctx, c"terminated".as_ptr());
+            qjs::JS_SetUncatchableException(ctx, 1);
+            -1
+        }
+        _ => 0,
+    }
+}
+
+unsafe extern "C" fn on_native(
+    ctx: *mut qjs::JSContext,
+    func: qjs::JSValue,
+    _: *mut c_void,
+) -> c_int {
+    let name = qjs::JS_GetPropertyStr(ctx, func, c"name".as_ptr());
+    let name = describe(ctx, name);
+    let throw = name == "max";
+    EVENTS.with(|e| e.borrow_mut().push(format!("native:{name}")));
+    if throw {
+        qjs::JS_ThrowTypeError(ctx, c"native".as_ptr());
+        return -1;
+    }
+    0
+}
+
+unsafe extern "C" fn terminate(_: *mut RawJSContext) -> bool {
+    false
+}
+
+unsafe extern "C" fn request_termination(cx: *mut RawJSContext, _: u32, _: *mut Value) -> bool {
+    jsapi::JS_RequestInterruptCallback(cx);
+    true
+}
+
+/// Installs the frame hooks, runs `source` as a script, removes them and returns the result.
+fn run_with_frame_hooks(cx: &mut JSContext, source: &str) -> Option<String> {
+    let script = compile(cx, source);
+    let rt = unsafe { qjs::JS_GetRuntime(script_ctx(script)) };
+    ENTERS.with(|c| c.set(0));
+    unsafe { qjs::JS_SetFrameHooks(rt, Some(on_enter), Some(on_exit), ptr::null_mut()) };
+    let result = execute(cx, script);
+    unsafe { qjs::JS_SetFrameHooks(rt, None, None, ptr::null_mut()) };
+    result
+}
+
+#[test]
+fn frame_hooks() {
+    with_global(|cx| {
+        assert_eq!(
+            run_with_frame_hooks(cx, "function f(x) { return x + 1; } f(1)").as_deref(),
+            Some("2")
+        );
+        assert_eq!(events(), ["enter", "enter", "return:2", "return:2"]);
+
+        assert_eq!(
+            run_with_frame_hooks(cx, "function t() { throw 7; } try { t(); } catch (e) { e }")
+                .as_deref(),
+            Some("7")
+        );
+        assert_eq!(events(), ["enter", "enter", "throw:7", "return:7"]);
+
+        assert_eq!(
+            run_with_frame_hooks(
+                cx,
+                "function* g() { yield 1; return 2; } let it = g(); [it.next().value, it.next().value].join()"
+            )
+            .as_deref(),
+            Some("\"1,2\"")
+        );
+        assert_eq!(
+            events(),
+            [
+                "enter",
+                "enter",
+                "suspend:undefined",
+                "enter",
+                "suspend:1",
+                "enter",
+                "return:2",
+                "return:1,2"
+            ]
+        );
+
+        assert_eq!(
+            run_with_frame_hooks(cx, "async function a() { await 5; return 6; } a(); 0").as_deref(),
+            Some("0")
+        );
+        let rt =
+            unsafe { qjs::JS_GetRuntime(qjs::JS_GetScriptRealm(script_value(compile(cx, "0")))) };
+        unsafe {
+            qjs::JS_SetFrameHooks(rt, Some(on_enter), Some(on_exit), ptr::null_mut());
+            jsapi::RunJobs(cx.raw_cx());
+            qjs::JS_SetFrameHooks(rt, None, None, ptr::null_mut());
+        }
+        assert_eq!(
+            events(),
+            [
+                "enter",
+                "enter",
+                "suspend:5",
+                "return:0",
+                "enter",
+                "return:6"
+            ]
+        );
+    });
+}
+
+#[test]
+fn frame_hooks_keep_the_pending_exception() {
+    with_global(|cx| {
+        CLOBBER.with(|c| c.set(true));
+        let result =
+            run_with_frame_hooks(cx, "function t() { throw 7; } try { t(); } catch (e) { e }");
+        CLOBBER.with(|c| c.set(false));
+        assert_eq!(result.as_deref(), Some("7"));
+        assert_eq!(events(), ["enter", "enter", "throw:7", "return:7"]);
+    });
+}
+
+#[test]
+fn exit_hook_fails() {
+    with_global(|cx| {
+        let source =
+            "function f() { return 2; } let r; try { r = f(); } catch (e) { r = e.message; } r";
+        FAIL_EXIT.with(|f| f.set(1));
+        let thrown = run_with_frame_hooks(cx, source);
+        FAIL_EXIT.with(|f| f.set(2));
+        let terminated = run_with_frame_hooks(cx, source);
+        FAIL_EXIT.with(|f| f.set(0));
+        assert_eq!(
+            thrown.as_deref(),
+            Some("\"exit\""),
+            "the frame throws the hook's exception"
+        );
+        assert_eq!(terminated, None, "an uncatchable one terminates the script");
+        events();
+    });
+}
+
+#[test]
+fn enter_hook_throws() {
+    with_global(|cx| {
+        THROW_ON_ENTER.with(|t| t.set(2));
+        let result = run_with_frame_hooks(
+            cx,
+            "function f() { return 1; } let r; try { f(); } catch (e) { r = e.message; } r",
+        );
+        THROW_ON_ENTER.with(|t| t.set(0));
+        assert_eq!(result.as_deref(), Some("\"enter\""));
+        assert_eq!(
+            events(),
+            ["enter", "enter", "throw:TypeError: enter", "return:enter"]
+        );
+    });
+}
+
+#[test]
+fn terminated_frames() {
+    with_global(|cx| unsafe {
+        assert!(jsapi::JS_AddInterruptCallback(cx.raw_cx(), Some(terminate)));
+        rooted!(&in(cx) let global = jsapi::CurrentGlobalOrNull(cx.raw_cx()));
+        assert!(!jsapi::JS_DefineFunction(
+            cx.raw_cx(),
+            global.handle().into(),
+            c"requestTermination".as_ptr(),
+            Some(request_termination),
+            0,
+            0
+        )
+        .is_null());
+        let result = run_with_frame_hooks(
+            cx,
+            "function loop() { requestTermination(); for (;;) {} } loop()",
+        );
+        assert_eq!(result, None);
+        assert_eq!(events(), ["enter", "enter", "terminate", "terminate"]);
+    });
+}
+
+#[test]
+fn native_call_hook() {
+    with_global(|cx| {
+        let script = compile(
+            cx,
+            "let r = [[3].map(x => x * 2)[0], new Map().size, (function () { return 4; }).call()];
+             try { Math.max(1, 2); } catch (e) { r.push(e.message); }
+             r.join()",
+        );
+        let rt = unsafe { qjs::JS_GetRuntime(script_ctx(script)) };
+        unsafe { qjs::JS_SetNativeCallHook(rt, Some(on_native), ptr::null_mut()) };
+        let result = execute(cx, script);
+        unsafe { qjs::JS_SetNativeCallHook(rt, None, ptr::null_mut()) };
+        assert_eq!(result.as_deref(), Some("\"6,0,4,native\""));
+        // Native getters are native calls too.
+        assert_eq!(
+            events(),
+            [
+                "native:map",
+                "native:get [Symbol.species]",
+                "native:Map",
+                "native:get size",
+                "native:call",
+                "native:max",
+                "native:push",
+                "native:join"
+            ]
+        );
     });
 }

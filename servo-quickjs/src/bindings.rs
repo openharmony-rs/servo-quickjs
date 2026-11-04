@@ -1985,6 +1985,47 @@ unsafe extern "C" {
         pc: u32,
     ) -> ::std::os::raw::c_int;
 }
+pub const JS_FRAME_EXIT_RETURN: JSFrameExitKind = 0;
+pub const JS_FRAME_EXIT_THROW: JSFrameExitKind = 1;
+pub const JS_FRAME_EXIT_TERMINATE: JSFrameExitKind = 2;
+pub const JS_FRAME_EXIT_SUSPEND: JSFrameExitKind = 3;
+pub type JSFrameExitKind = ::std::os::raw::c_uint;
+pub type JSFrameEnterHook = ::std::option::Option<
+    unsafe extern "C" fn(
+        ctx: *mut JSContext,
+        opaque: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int,
+>;
+pub type JSFrameExitHook = ::std::option::Option<
+    unsafe extern "C" fn(
+        ctx: *mut JSContext,
+        kind: JSFrameExitKind,
+        value: JSValue,
+        opaque: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int,
+>;
+pub type JSNativeCallHook = ::std::option::Option<
+    unsafe extern "C" fn(
+        ctx: *mut JSContext,
+        func: JSValue,
+        opaque: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int,
+>;
+unsafe extern "C" {
+    pub fn JS_SetFrameHooks(
+        rt: *mut JSRuntime,
+        enter: JSFrameEnterHook,
+        exit: JSFrameExitHook,
+        opaque: *mut ::std::os::raw::c_void,
+    );
+}
+unsafe extern "C" {
+    pub fn JS_SetNativeCallHook(
+        rt: *mut JSRuntime,
+        hook: JSNativeCallHook,
+        opaque: *mut ::std::os::raw::c_void,
+    );
+}
 pub type JSImportMetaHook = ::std::option::Option<
     unsafe extern "C" fn(
         ctx: *mut JSContext,

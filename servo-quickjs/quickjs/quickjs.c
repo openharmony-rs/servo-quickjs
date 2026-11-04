@@ -413,6 +413,12 @@ struct JSRuntime {
     uint32_t insn_walk_prev;
     JSBreakpointHandler *breakpoint_handler;
     void *breakpoint_opaque;
+    /* Servo: hooks for debuggers (Q46) */
+    JSFrameEnterHook *frame_enter_hook;
+    JSFrameExitHook *frame_exit_hook;
+    void *frame_hook_opaque;
+    JSNativeCallHook *native_call_hook;
+    void *native_call_opaque;
 
     JSModuleNormalizeFunc *module_normalize_func;
     BOOL module_loader_has_attr;
@@ -18377,6 +18383,132 @@ static void js_free_breakpoints(JSRuntime *rt, JSFunctionBytecode *b)
     js_delete_breakpoints(rt, bps);
 }
 
+/* Servo: the pending exception, put aside while a debugger hook runs (Q46) */
+typedef struct JSSavedException {
+    JSValue value;
+    BOOL is_uncatchable;
+    BOOL has_location;
+    JSAtom filename;
+    int line_num;
+    int col_num;
+} JSSavedException;
+
+static void js_save_exception(JSRuntime *rt, JSSavedException *e)
+{
+    e->value = rt->current_exception;
+    e->is_uncatchable = rt->current_exception_is_uncatchable;
+    e->has_location = rt->current_exception_has_location;
+    e->filename = rt->current_exception_filename;
+    e->line_num = rt->current_exception_line_num;
+    e->col_num = rt->current_exception_col_num;
+    rt->current_exception = JS_UNINITIALIZED;
+    rt->current_exception_is_uncatchable = FALSE;
+    rt->current_exception_has_location = FALSE;
+    rt->current_exception_filename = JS_ATOM_NULL;
+}
+
+/* makes 'e' the pending exception again, dropping any other */
+static void js_restore_exception(JSRuntime *rt, JSSavedException *e)
+{
+    JS_FreeValueRT(rt, rt->current_exception);
+    JS_FreeAtomRT(rt, rt->current_exception_filename);
+    rt->current_exception = e->value;
+    rt->current_exception_is_uncatchable = e->is_uncatchable;
+    rt->current_exception_has_location = e->has_location;
+    rt->current_exception_filename = e->filename;
+    rt->current_exception_line_num = e->line_num;
+    rt->current_exception_col_num = e->col_num;
+}
+
+static void js_free_saved_exception(JSRuntime *rt, JSSavedException *e)
+{
+    JS_FreeValueRT(rt, e->value);
+    JS_FreeAtomRT(rt, e->filename);
+}
+
+/* the current frame starts or resumes: -1 to throw the hook's exception instead
+   of a pending one */
+static int js_frame_enter_hook(JSContext *ctx)
+{
+    JSRuntime *rt = ctx->rt;
+    JSSavedException e;
+
+    js_save_exception(rt, &e);
+    if (rt->frame_enter_hook(ctx, rt->frame_hook_opaque) < 0) {
+        js_free_saved_exception(rt, &e);
+        if (!JS_HasException(ctx))
+            JS_ThrowInternalError(ctx, "debugger hook failed");
+        return -1;
+    }
+    js_restore_exception(rt, &e);
+    return 0;
+}
+
+/* the current frame stops: 'ret_val' is its result, JS_EXCEPTION if it threw (or
+   was terminated), or an int if it suspended (yield or await), with the value at
+   'sp[-1]' for generators. Returns the result: JS_EXCEPTION, with the hook's
+   exception, if the hook failed. */
+static JSValue js_frame_exit_hook(JSContext *ctx, JSFunctionBytecode *b,
+                                  JSValue ret_val, JSValue *sp, JSValue *stack_buf)
+{
+    JSRuntime *rt = ctx->rt;
+    JSSavedException e;
+    JSFrameExitKind kind;
+    JSValueConst value;
+
+    js_save_exception(rt, &e);
+    if (JS_IsException(ret_val)) {
+        kind = e.is_uncatchable ? JS_FRAME_EXIT_TERMINATE : JS_FRAME_EXIT_THROW;
+        value = e.value;
+    } else if (b->func_kind == JS_FUNC_NORMAL) {
+        kind = JS_FRAME_EXIT_RETURN;
+        value = ret_val;
+    } else {
+        kind = JS_VALUE_GET_TAG(ret_val) == JS_TAG_INT ?
+            JS_FRAME_EXIT_SUSPEND : JS_FRAME_EXIT_RETURN;
+        value = sp > stack_buf ? sp[-1] : JS_UNDEFINED;
+    }
+    if (rt->frame_exit_hook(ctx, kind, value, rt->frame_hook_opaque) < 0) {
+        js_free_saved_exception(rt, &e);
+        if (!JS_HasException(ctx))
+            JS_ThrowInternalError(ctx, "debugger hook failed");
+        JS_FreeValue(ctx, ret_val);
+        return JS_EXCEPTION;
+    }
+    js_restore_exception(rt, &e);
+    return ret_val;
+}
+
+/* whether calls of objects of a class run native code: not that of bytecode
+   functions, generators and async functions, bound functions or proxies */
+static BOOL js_class_is_native_call(JSClassID class_id)
+{
+    switch(class_id) {
+    case JS_CLASS_GENERATOR_FUNCTION:
+    case JS_CLASS_ASYNC_FUNCTION:
+    case JS_CLASS_ASYNC_GENERATOR_FUNCTION:
+    case JS_CLASS_BOUND_FUNCTION:
+    case JS_CLASS_PROXY:
+        return FALSE;
+    default:
+        return TRUE;
+    }
+}
+
+static int js_native_call_hook(JSContext *ctx, JSObject *p)
+{
+    JSRuntime *rt = ctx->rt;
+
+    if (!js_class_is_native_call(p->class_id))
+        return 0;
+    if (rt->native_call_hook(ctx, JS_MKPTR(JS_TAG_OBJECT, p), rt->native_call_opaque) < 0) {
+        if (!JS_HasException(ctx))
+            JS_ThrowInternalError(ctx, "debugger hook failed");
+        return -1;
+    }
+    return 0;
+}
+
 #ifdef OPCODE_ASM_LABEL
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-label"
@@ -18446,6 +18578,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             pc = sf->cur_pc;
             sf->prev_frame = rt->current_stack_frame;
             rt->current_stack_frame = sf;
+            /* Servo: debugger hook (Q46) */
+            if (unlikely(rt->frame_enter_hook) && js_frame_enter_hook(ctx) < 0)
+                goto exception;
             if (s->throw_flag)
                 goto exception;
             else
@@ -18462,6 +18597,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         not_a_function:
             return JS_ThrowTypeError(caller_ctx, "not a function");
         }
+        /* Servo: debugger hook (Q46) */
+        if (unlikely(rt->native_call_hook) && js_native_call_hook(caller_ctx, p) < 0)
+            return JS_EXCEPTION;
         return call_func(caller_ctx, func_obj, this_obj, argc,
                          (JSValueConst *)argv, flags);
     }
@@ -18511,6 +18649,12 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     sf->prev_frame = rt->current_stack_frame;
     rt->current_stack_frame = sf;
     ctx = b->realm; /* set the current realm */
+    /* Servo: debugger hook (Q46) */
+    if (unlikely(rt->frame_enter_hook)) {
+        sf->cur_pc = pc;
+        if (js_frame_enter_hook(ctx) < 0)
+            goto exception;
+    }
 
  restart:
     for(;;) {
@@ -21370,8 +21514,16 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     done_generator:
         sf->cur_pc = pc;
         sf->cur_sp = sp;
+        /* Servo: debugger hook (Q46) */
+        if (unlikely(rt->frame_exit_hook))
+            ret_val = js_frame_exit_hook(ctx, b, ret_val, sp, stack_buf);
     } else {
     done:
+        /* Servo: debugger hook (Q46) */
+        if (unlikely(rt->frame_exit_hook)) {
+            sf->cur_pc = pc;
+            ret_val = js_frame_exit_hook(ctx, b, ret_val, sp, stack_buf);
+        }
         if (unlikely(b->var_ref_count != 0)) {
             /* variable references reference the stack: must close them */
             close_var_refs(rt, b, sf);
@@ -21511,6 +21663,9 @@ static JSValue JS_CallConstructorInternal(JSContext *ctx,
         not_a_function:
             return JS_ThrowTypeError(ctx, "not a function");
         }
+        /* Servo: debugger hook (Q46) */
+        if (unlikely(ctx->rt->native_call_hook) && js_native_call_hook(ctx, p) < 0)
+            return JS_EXCEPTION;
         return call_func(ctx, func_obj, new_target, argc,
                          (JSValueConst *)argv, flags);
     }
@@ -63797,6 +63952,22 @@ int JS_SetBreakpoint(JSContext *ctx, JSValueConst script, uint32_t pc)
     bps->count++;
     b->byte_code_buf[pc] = OP_breakpoint;
     return 0;
+}
+
+/* Servo: debugger hooks (Q46) */
+
+void JS_SetFrameHooks(JSRuntime *rt, JSFrameEnterHook *enter, JSFrameExitHook *exit,
+                      void *opaque)
+{
+    rt->frame_enter_hook = enter;
+    rt->frame_exit_hook = exit;
+    rt->frame_hook_opaque = opaque;
+}
+
+void JS_SetNativeCallHook(JSRuntime *rt, JSNativeCallHook *hook, void *opaque)
+{
+    rt->native_call_hook = hook;
+    rt->native_call_opaque = opaque;
 }
 
 int JS_ClearBreakpoint(JSRuntime *rt, JSValueConst script, uint32_t pc)
