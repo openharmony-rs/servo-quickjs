@@ -102,15 +102,20 @@ unsafe fn evaluate(
     q::JS_EvalFunction(cx.qctx(), code)
 }
 
-/// Tells the debuggers about the code of a new script.
+/// Tells the debuggers about the code of a new script. A termination of a hook requests the
+/// interrupt again, which terminates the script that runs.
 unsafe fn new_script(cx: &Cx, options: &CompileOptions, code: q::JSValue, text: &[u8]) {
-    super::new_script(
+    if super::new_script(
         cx,
         code,
         &options.filename,
         text,
         options.base._base.introductionType,
-    );
+        options.base.lineno,
+    ) < 0
+    {
+        super::reinterrupt(cx, cx.qctx());
+    }
 }
 
 /// The UTF-8 code units of a source.

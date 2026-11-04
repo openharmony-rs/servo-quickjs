@@ -22,7 +22,7 @@ use mozjs::rooted;
 use mozjs::rust::wrappers2::{
     ClearKeptObjects, Compile, CompileFunction, CompileModule, CompileModule1, Evaluate,
     InstantiateGlobalStencil, JS_DefineDebuggerObject, JS_ExecuteScript, JS_NewGlobalObject,
-    JS_SetProperty, JS_GC,
+    JS_SetNativeStackQuota, JS_SetProperty, ModuleEvaluate, ModuleLink, JS_GC,
 };
 use mozjs::rust::{
     evaluate_script, transform_str_to_source_text, transform_u16_to_source_text,
@@ -61,8 +61,17 @@ function assertThrows(f, what) {
   try { f(); } catch (e) { return e; }
   throw new Error(`${what}: did not throw`);
 }
+// Exceptions in hooks of debuggers that record them fail the test.
+var hookErrors = [];
+function recordHookErrors(dbg) {
+  dbg.uncaughtExceptionHook = e => { hookErrors.push(`${e}\\n${e.stack}`); };
+  return dbg;
+}
 function test(f) {
-  try { f(); return 'ok'; } catch (e) { return `${e}\\n${e.stack}`; }
+  try {
+    f();
+    return hookErrors.length ? `in hooks: ${hookErrors.splice(0).join('\\n')}` : 'ok';
+  } catch (e) { return `${e}\\n${e.stack}`; }
 }";
 
 /// Evaluates `source` in `global` as a script of `url` with an introduction type.
@@ -312,8 +321,9 @@ fn execute_in_global() {
             assertEq(g.executeInGlobal('x').return, 40, 'runs after a termination');
             assertThrows(() => dbg.addDebuggee(debuggee).executeInGlobal.call(c.return, '1'), 'not a global');
             dbg.shouldAvoidSideEffects = true;
-            assertEq(g.executeInGlobal('x = 0'), null, 'side effects are not run');
-            assertEq(debuggee.x, 40, 'nothing ran');
+            assertEq(g.executeInGlobal('var z = 0'), null, 'declarations are not run');
+            assertEq('z' in debuggee, false, 'nothing ran');
+            assertEq(g.executeInGlobal('x + 1').return, 41, 'other code runs');
             ",
         );
     });
@@ -368,9 +378,16 @@ fn objects() {
             assertEq(o.getProperty('c').return, 2, 'getProperty');
             assertEq(o.global, g, 'global');
             assertThrows(() => f.call({}), 'debugger objects are not debuggee values');
-            assertEq(g.asEnvironment().type, 'object', 'global environment');
-            assertEq(g.asEnvironment().object, g, 'its object');
-            assertEq(g.asEnvironment().names().includes('requestTermination'), true, 'names');
+            g.executeInGlobal('let lexical = 1; const constant = 2;');
+            const env = g.asEnvironment();
+            assertEq(env.type, 'declarative', 'global lexical environment');
+            assertEq(env.names().join(), 'lexical,constant', 'its names');
+            assertEq(env.getVariable('constant'), 2, 'getVariable');
+            assertEq(env.parent.type, 'object', 'global environment');
+            assertEq(env.parent.object, g, 'its object');
+            assertEq(env.parent.names().includes('requestTermination'), true, 'names');
+            assertEq(env.parent.parent, null, 'outermost');
+            assertEq(g.asEnvironment(), env, 'one Debugger.Environment per environment');
             ",
         );
     });
@@ -402,8 +419,13 @@ fn termination_in_hook() {
         eval(
             cx,
             global,
-            "var dbg = new Debugger(debuggee);
-             dbg.onNewScript = () => { dbg.addDebuggee(debuggee).executeInGlobal('requestTermination()'); for (;;) {} };",
+            "var dbg = new Debugger(debuggee), once = false;
+             dbg.onNewScript = () => {
+               if (once) return;
+               once = true;
+               dbg.addDebuggee(debuggee).executeInGlobal('requestTermination()');
+               for (;;) {}
+             };",
         );
         assert_eq!(
             eval_in(cx, debuggee, "1 + 1", c"https://example.com/a.js", None)
@@ -450,7 +472,7 @@ fn window_proxy_debuggee() {
             assertEq(wp.unsafeDereference(), windowProxy, 'this is the WindowProxy');
             assertEq(wp.class, g.class, 'its class is that of its window');
             assertEq(wp.executeInGlobal('typeof requestTermination').return, 'function', 'executeInGlobal');
-            assertEq(wp.asEnvironment().object, g, 'asEnvironment');
+            assertEq(wp.asEnvironment().parent.object, g, 'asEnvironment');
             dbg.removeDebuggee(windowProxy);
             assertEq(dbg.hasDebuggee(debuggee), false, 'removeDebuggee');
             ",
@@ -631,6 +653,577 @@ fn exclusive_debugger_on_eval() {
             g.executeInGlobal('2');
             assertEq(seen.join(), 'eager 1,main 2,eager 2', 'other debuggers miss exclusive evaluations');
             ",
+        );
+    });
+}
+
+/// Compiles `source` as a classic script of `target` starting at `line` (as Servo's inline
+/// scripts), and runs it.
+fn run_at(cx: &mut JSContext, target: SafeHandleObject, source: &str, url: &CStr, line: u32) {
+    unsafe {
+        let mut realm = AutoRealm::new_from_handle(cx, target);
+        let cx = &mut *realm;
+        let mut options = CompileOptionsWrapper::new(cx, url.to_owned(), line);
+        options.set_introduction_type(c"inlineScript");
+        let script = mozjs::rust::wrappers2::Compile1(
+            cx,
+            options.ptr,
+            &mut transform_str_to_source_text(source),
+        );
+        assert!(!script.is_null());
+        rooted!(&in(cx) let script = script);
+        rooted!(&in(cx) let mut rval = UndefinedValue());
+        assert!(JS_ExecuteScript(cx, script.handle(), rval.handle_mut()));
+    }
+}
+
+/// Compiles `source` as a classic script of `target` starting at `line` off the main thread, as
+/// Servo's external scripts, and instantiates it.
+fn instantiate_at(
+    cx: &mut JSContext,
+    target: SafeHandleObject,
+    source: &str,
+    url: &CStr,
+    line: u32,
+) {
+    unsafe {
+        let mut realm = AutoRealm::new_from_handle(cx, target);
+        let cx = &mut *realm;
+        let mut options = CompileOptionsWrapper::new(cx, url.to_owned(), line);
+        options.set_introduction_type(c"srcScript");
+        let mut result =
+            compile_to_stencil_offthread(options.ptr, Arc::new(source.to_owned()), Some)
+                .finish()
+                .unwrap();
+        let instantiate_options = (&result.compile_options).into();
+        assert!(!InstantiateGlobalStencil(
+            cx,
+            &instantiate_options,
+            **result.stencil.as_ref().unwrap(),
+            result.storage.as_mut_ptr(),
+        )
+        .is_null());
+    }
+}
+
+#[test]
+fn stencils_instantiate_where_their_source_does_not_compile() {
+    with_globals(|cx, global, debuggee, _| {
+        eval(
+            cx,
+            global,
+            "var dbg = new Debugger(debuggee), scripts = []; dbg.onNewScript = s => scripts.push(s);",
+        );
+        let depth = 600;
+        let source = format!("var nested = {}1{};", "[".repeat(depth), "]".repeat(depth));
+        // Too little stack left to compile the script again here.
+        unsafe { JS_SetNativeStackQuota(cx, 64 * 1024, 64 * 1024, 64 * 1024) };
+        instantiate_at(cx, debuggee, &source, c"https://example.com/deep.js", 1);
+        unsafe { JS_SetNativeStackQuota(cx, 0, 0, 0) };
+        check(
+            cx,
+            global,
+            "assertEq(scripts.length, 1, 'onNewScript');
+             assertEq(scripts[0].source.url, 'https://example.com/deep.js', 'its url');",
+        );
+    });
+}
+
+/// The breakpoint positions of a source, as devtools lists them: `line: [column, …]`, 0-based
+/// columns, over the script and its functions.
+const POSITIONS: &str = "
+function positions(script) {
+  const lines = new Map;
+  const walk = s => {
+    for (const p of s.getPossibleBreakpoints()) {
+      if (!lines.has(p.lineNumber)) lines.set(p.lineNumber, []);
+      lines.get(p.lineNumber).push(p.columnNumber - 1);
+    }
+    s.getChildScripts().forEach(walk);
+  };
+  walk(script);
+  return [...lines].sort((a, b) => a[0] - b[0])
+    .map(([line, columns]) => `${line}: ${columns.sort((a, b) => a - b).join(' ')}`).join(', ');
+}";
+
+#[test]
+fn breakpoint_positions() {
+    with_globals(|cx, global, debuggee, _| {
+        eval_in(
+            cx,
+            debuggee,
+            "var console = { log() {} }; function setTimeout() {}",
+            c"https://example.com/stubs.js",
+            None,
+        )
+        .unwrap();
+        eval(cx, global, POSITIONS);
+        eval(
+            cx,
+            global,
+            "var dbg = new Debugger(debuggee), scripts = []; dbg.onNewScript = s => scripts.push(s);",
+        );
+        // Servo's devtools tests `test_source_breakable_lines_and_positions(_with_functions)`.
+        run_at(
+            cx,
+            debuggee,
+            "\n    console.log(1); console.log(2);\n    /*💖💖💖*/ console.log(1); console.log(2);\n    \
+             /*🏳️‍⚧️*/ console.log(1); console.log(2);\n",
+            c"https://example.com/test.html",
+            3,
+        );
+        run_at(
+            cx,
+            debuggee,
+            "\n    function runContinuously() {\n        setTimeout(() => {\n            \
+             runContinuously();\n        }, 1000);\n    }\n    runContinuously();\n",
+            c"https://example.com/test_with_functions.html",
+            3,
+        );
+        instantiate_at(
+            cx,
+            debuggee,
+            "\n    function runContinuously() {\n        setTimeout(() => {\n            \
+             runContinuously();\n        }, 1000);\n    }\n    runContinuously();\n\
+             //# sourceURL=https://example.com/named.js\n",
+            c"https://example.com/external.js",
+            3,
+        );
+        check(
+            cx,
+            global,
+            "
+            assertEq(positions(scripts[0]), '4: 4 12 20 28, 5: 15 23 31 39, 6: 15 23 31 39, 7: 0', 'statements and calls');
+            assertEq(positions(scripts[1]), '5: 8 18, 6: 12, 7: 8, 8: 4, 9: 4, 10: 0', 'functions');
+            const [f] = scripts[1].getChildScripts();
+            assertEq(f.displayName, 'runContinuously', 'displayName');
+            assertEq(f.startLine, 4, 'startLine');
+            assertEq(f.getChildScripts()[0].displayName, undefined, 'arrow functions have no name');
+            assertEq(scripts[1].sourceStart, 0, 'sourceStart of the script');
+            assertEq(scripts[1].source.text.slice(f.sourceStart, f.sourceStart + 8), 'function', 'sourceStart of a function');
+            const [p] = f.getPossibleBreakpoints({ line: 5 });
+            const meta = f.getOffsetMetadata(p.offset);
+            assertEq(`${meta.lineNumber}:${meta.columnNumber} ${meta.isBreakpoint} ${meta.isStepStart}`, '5:9 true true', 'a statement');
+            const call = f.getPossibleBreakpoints({ line: 5 })[1];
+            assertEq(f.getOffsetMetadata(call.offset).isStepStart, false, 'a call');
+            assertEq(positions(scripts[2]), '5: 8 18, 6: 12, 7: 8, 8: 4, 9: 4, 11: 0', 'a script instantiated from a stencil');
+            assertEq(scripts[2].source.displayURL, 'https://example.com/named.js', 'its sourceURL');
+            ",
+        );
+    });
+}
+
+#[test]
+fn frames_and_environments() {
+    with_globals(|cx, global, debuggee, _| {
+        // Scripts compiled while a debugger has a debuggee have SpiderMonkey's positions.
+        eval(
+            cx,
+            global,
+            "var dbg = recordHookErrors(new Debugger), g = dbg.addDebuggee(debuggee);",
+        );
+        eval_in(
+            cx,
+            debuggee,
+            "function add(a, b) {
+               let sum = a + b;
+               const twice = sum * 2;
+               return twice;
+             }
+             var obj = { m(x) { return add(x, 1); } };
+             function outer() { let captured = 5; return function inner() { return captured; }; }
+             var inner = outer();
+             let lexical = 'l';",
+            c"https://example.com/f.js",
+            None,
+        )
+        .unwrap();
+        check(
+            cx,
+            global,
+            "
+            const add = g.getOwnPropertyDescriptor('add').value.script;
+            const at = line => add.getPossibleBreakpoints({ line })[0].offset;
+            const seen = [];
+            let saved;
+            add.setBreakpoint(at(2), { hit(frame) {
+              const env = frame.environment;
+              seen.push(`tdz ${env.getVariable('sum').uninitialized} ${env.getVariable('twice').uninitialized}`);
+            } });
+            add.setBreakpoint(at(4), { hit(frame) {
+              saved = frame;
+              assertEq(dbg.getNewestFrame(), frame, 'getNewestFrame');
+              assertEq(frame.type, 'call', 'type');
+              assertEq(frame.callee.name, 'add', 'callee');
+              assertEq(frame.script, add, 'script');
+              assertEq(frame.offset, at(4), 'offset');
+              assertEq(frame.this, g, 'the global is the this of sloppy calls');
+              const meta = frame.script.getOffsetMetadata(frame.offset);
+              assertEq(`${meta.lineNumber}:${meta.columnNumber}`, '4:16', 'location');
+              const older = frame.older;
+              assertEq(older.callee.name, 'm', 'older');
+              assertEq(older.this.class, 'Object', 'its this');
+              assertEq(older.script.getOffsetMetadata(older.offset).lineNumber, 6, 'its location: the call');
+              assertEq(older.older.type, 'global', 'the evaluated code');
+              assertEq(older.older.older, null, 'oldest');
+              const env = frame.environment;
+              assertEq(frame.environment, env, 'one Debugger.Environment per frame');
+              assertEq(env.type, 'declarative', 'environment type');
+              assertEq(env.calleeScript, add, 'calleeScript');
+              assertEq(env.names().join(), 'a,b,sum,twice', 'names');
+              assertEq(env.getVariable('sum'), 3, 'getVariable');
+              env.setVariable('sum', 10);
+              assertEq(frame.eval('sum').return, 10, 'setVariable');
+              assertEq(frame.eval('a + b + twice').return, 9, 'frame.eval');
+              assertEq(frame.eval('b = 4; b').return, 4, 'assignment');
+              assertEq(env.getVariable('b'), 4, 'assignment reaches the frame');
+              assertEq(frame.eval('twice = 1').throw.unsafeDereference() instanceof debuggee.TypeError, true, 'const');
+              assertEq(frame.eval('nope').throw.unsafeDereference() instanceof debuggee.ReferenceError, true, 'unbound');
+              assertEq(frame.eval('typeof arguments').return, 'undefined', 'no arguments of the evaluator');
+              assertEq(frame.eval('typeof debuggerScope').return, 'undefined', 'no evaluator parameters');
+              assertEq(frame.eval('lexical + obj.m.name').return, 'lm', 'global bindings');
+              const global = env.parent;
+              assertEq(global.type, 'declarative', 'global lexical environment');
+              assertEq(global, g.asEnvironment(), 'the global environment');
+              assertEq(global.names().includes('lexical'), true, 'global lexical names');
+              assertEq(global.parent.object, g, 'global object environment');
+            } });
+            assertEq(g.executeInGlobal('obj.m(2)').return, 6, 'result');
+            assertEq(seen.join(), 'tdz true true', 'uninitialized');
+            assertEq(saved.onStack, false, 'the frame stopped');
+            assertThrows(() => saved.offset, 'dead frames have no offset');
+            assertEq(saved.script, add, 'dead frames keep their script');
+            add.clearAllBreakpoints();
+            assertEq(g.executeInGlobal('add(1, 1)').return, 4, 'cleared');
+
+            const inner = g.getOwnPropertyDescriptor('inner').value.script;
+            let closure;
+            inner.setBreakpoint(inner.getPossibleBreakpoints()[0].offset, { hit(frame) {
+              const env = frame.environment;
+              closure = `${env.names().join()}|${env.parent.names().join()}|${env.parent.getVariable('captured')}`;
+              assertEq(frame.eval('captured = 7').return, 7, 'assigning a closure variable');
+            } });
+            assertEq(g.executeInGlobal('inner()').return, 7, 'closure variables');
+            assertEq(closure, '|captured|5', 'closure environment');
+            ",
+        );
+    });
+}
+
+#[test]
+fn stepping_and_hooks() {
+    with_globals(|cx, global, debuggee, _| {
+        eval(
+            cx,
+            global,
+            "var dbg = recordHookErrors(new Debugger), g = dbg.addDebuggee(debuggee);",
+        );
+        eval_in(
+            cx,
+            debuggee,
+            "function step() {
+               let x = 1;
+               x += 1;
+               return x;
+             }
+             function thrower() { throw new Error('t'); }",
+            c"https://example.com/s.js",
+            None,
+        )
+        .unwrap();
+        check(
+            cx,
+            global,
+            "
+            const lines = [], pops = [];
+            dbg.onEnterFrame = frame => {
+              if (frame.type !== 'call') return;
+              frame.onStep = function () {
+                lines.push(this.script.getOffsetMetadata(this.offset).lineNumber);
+              };
+              frame.onPop = function (c) {
+                pops.push(c.return !== undefined ? `return ${c.return}` : `throw ${c.throw.class}`);
+              };
+            };
+            assertEq(g.executeInGlobal('step()').return, 2, 'result');
+            assertEq(lines.join(), '2,3,4', 'steps');
+            assertEq(g.executeInGlobal('try { thrower(); } catch (e) { 1 }').return, 1, 'caught');
+            assertEq(pops.join(), 'return 2,throw Error', 'onPop');
+            dbg.onEnterFrame = undefined;
+            lines.length = 0;
+            g.executeInGlobal('step()');
+            assertEq(lines.length, 0, 'steps end with the frame');
+            dbg.onEnterFrame = () => null;
+            assertEq(g.executeInGlobal('step()'), null, 'onEnterFrame terminates');
+            dbg.onEnterFrame = undefined;
+            const step = g.getOwnPropertyDescriptor('step').value.script;
+            step.setBreakpoint(step.getPossibleBreakpoints({ line: 3 })[0].offset, { hit: () => null });
+            assertEq(g.executeInGlobal('step()'), null, 'a breakpoint terminates');
+            assertEq(g.executeInGlobal('1 + 1').return, 2, 'runs after');
+            dbg.removeDebuggee(debuggee);
+            dbg.addDebuggee(debuggee);
+            assertEq(g.executeInGlobal('step()').return, 2, 'removing the debuggee clears breakpoints');
+            ",
+        );
+    });
+}
+
+#[test]
+fn side_effect_free_evaluation() {
+    with_globals(|cx, global, debuggee, _| {
+        eval_in(
+            cx,
+            debuggee,
+            "var counter = 0;
+             function pure(a) { return a * 2; }
+             function impure() { counter++; return counter; }",
+            c"https://example.com/e.js",
+            None,
+        )
+        .unwrap();
+        check(
+            cx,
+            global,
+            "
+            const main = new Debugger(debuggee), seen = [];
+            main.onNewScript = s => seen.push(s.source.text);
+            // As devtools' createSideEffectFreeDebugger.
+            const eager = new Debugger;
+            eager.exclusiveDebuggerOnEval = true;
+            const g = eager.addDebuggee(debuggee);
+            const handler = { hit: () => null };
+            eager.onEnterFrame = frame => {
+              frame.onStep = () => undefined;
+              for (const offset of frame.script.getEffectfulOffsets()) frame.script.setBreakpoint(offset, handler);
+            };
+            eager.onNativeCall = () => null;
+            eager.shouldAvoidSideEffects = true;
+            assertEq(g.executeInGlobal('pure(2)').return, 4, 'pure code runs');
+            assertEq(g.executeInGlobal('impure()'), null, 'effects are terminated');
+            assertEq(g.executeInGlobal('counter = 5'), null, 'global assignments are effects');
+            assertEq(g.executeInGlobal('Math.max(1, 2)'), null, 'native calls are terminated');
+            assertEq(g.executeInGlobal('var v = 1'), null, 'declarations are terminated');
+            assertEq(debuggee.counter, 0, 'nothing changed');
+            assertEq('v' in debuggee, false, 'no declaration');
+            eager.onNativeCall = undefined;
+            eager.removeAllDebuggees();
+            assertEq(seen.length, 0, 'other debuggers miss eager evaluations');
+            assertEq(main.addDebuggee(debuggee).executeInGlobal('impure()').return, 1, 'its breakpoints are gone');
+            ",
+        );
+    });
+}
+
+/// devtools' createSideEffectFreeDebugger, cancelling after `limit` steps.
+const EAGER: &str = "
+function eagerDebugger(global, limit) {
+  const eager = recordHookErrors(new Debugger);
+  eager.exclusiveDebuggerOnEval = true;
+  const g = eager.addDebuggee(global);
+  let steps = 0;
+  const handler = { hit: () => null };
+  eager.onEnterFrame = frame => {
+    frame.onStep = () => (++steps > limit ? null : undefined);
+    for (const offset of frame.script.getEffectfulOffsets()) frame.script.setBreakpoint(offset, handler);
+  };
+  eager.onNativeCall = () => null;
+  eager.shouldAvoidSideEffects = true;
+  return [eager, g];
+}";
+
+#[test]
+fn side_effect_free_evaluation_limits() {
+    with_globals(|cx, global, _, _| {
+        eval(cx, global, EAGER);
+        check(
+            cx,
+            global,
+            "
+            const main = new Debugger(debuggee);
+            const [eager, g] = eagerDebugger(debuggee, 1000);
+            for (const code of ['for (;;) {}', 'for (;;);', 'while (true) {}', 'do {} while (true)']) {
+              assertEq(g.executeInGlobal(code), null, `${code} is cancelled`);
+            }
+            assertEq(g.executeInGlobal('eval(\"var leakedVar = 1\")'), null, 'direct eval');
+            assertEq(g.executeInGlobal('eval(\"function leakedFn() {}\")'), null, 'direct eval of a function');
+            assertEq('leakedVar' in debuggee || 'leakedFn' in debuggee, false, 'no declarations');
+            eager.removeAllDebuggees();
+            ",
+        );
+    });
+}
+
+#[test]
+fn frame_eval_scoping() {
+    with_globals(|cx, global, debuggee, _| {
+        eval(
+            cx,
+            global,
+            "var dbg = recordHookErrors(new Debugger), g = dbg.addDebuggee(debuggee);",
+        );
+        eval_in(
+            cx,
+            debuggee,
+            "var hijacked;
+             function shadow(debuggerCode, eval) { return debuggerCode + eval; }
+             var holder = { m() { return [1].map(() => { return this; })[0]; } };",
+            c"https://example.com/s.js",
+            None,
+        )
+        .unwrap();
+        check(
+            cx,
+            global,
+            "
+            g.executeInGlobal('globalThis.eval = c => (hijacked = c, \"hijacked\")');
+            const shadow = g.getOwnPropertyDescriptor('shadow').value.script;
+            let shadowed;
+            shadow.setBreakpoint(shadow.getPossibleBreakpoints()[0].offset, { hit(frame) {
+              shadowed = [frame.eval('debuggerCode').return, frame.eval('typeof eval').return,
+                frame.eval('debuggerCode + 1').return].join();
+            } });
+            assertEq(g.executeInGlobal('shadow(\"code\", 42)').return, 'code42', 'result');
+            assertEq(shadowed, 'code,number,code1', 'names of the frame, not of the evaluator');
+            assertEq(debuggee.hijacked, undefined, 'the eval of the realm, not of the page');
+            const holder = g.getOwnPropertyDescriptor('holder').value;
+            const arrow = holder.getOwnPropertyDescriptor('m').value.script.getChildScripts()[0];
+            let arrowThis;
+            arrow.setBreakpoint(arrow.getPossibleBreakpoints()[0].offset, { hit(frame) {
+              arrowThis = `${frame.this === holder} ${frame.eval('this').return === holder}`;
+            } });
+            g.executeInGlobal('holder.m()');
+            assertEq(arrowThis, 'true true', 'the lexical this of arrow functions');
+            ",
+        );
+    });
+}
+
+#[test]
+fn module_frames() {
+    with_globals(|cx, global, debuggee, _| {
+        eval(
+            cx,
+            global,
+            "var dbg = recordHookErrors(new Debugger(debuggee)), seen;
+             dbg.onNewScript = script => {
+               if (!script.isModule) return;
+               const [p] = script.getPossibleBreakpoints({ line: 2 });
+               script.setBreakpoint(p.offset, { hit(frame) {
+                 seen = `${frame.type} ${frame.environment.names().join()} ${frame.eval('modLocal + 1').return}`;
+               } });
+             };",
+        );
+        unsafe {
+            let mut realm = AutoRealm::new_from_handle(cx, debuggee);
+            let cx = &mut *realm;
+            let options = CompileOptionsWrapper::new(cx, c"https://example.com/m.js".to_owned(), 1);
+            let module = CompileModule1(
+                cx,
+                options.ptr,
+                &mut transform_str_to_source_text(
+                    "const modLocal = 1;\nglobalThis.out = modLocal;\n",
+                ),
+            );
+            assert!(!module.is_null());
+            rooted!(&in(cx) let module = module);
+            assert!(ModuleLink(cx, module.handle()));
+            rooted!(&in(cx) let mut rval = UndefinedValue());
+            assert!(ModuleEvaluate(cx, module.handle(), rval.handle_mut()));
+        }
+        check(
+            cx,
+            global,
+            "assertEq(seen, 'module modLocal 2', 'module variables'); assertEq(debuggee.out, 1, 'ran');",
+        );
+    });
+}
+
+#[test]
+fn on_pop_terminates() {
+    with_globals(|cx, global, _, _| {
+        check(
+            cx,
+            global,
+            "
+            const dbg = recordHookErrors(new Debugger), g = dbg.addDebuggee(debuggee);
+            dbg.onEnterFrame = frame => {
+              if (frame.type === 'call') frame.onPop = () => null;
+            };
+            assertEq(g.executeInGlobal('var after = 0; function five() { return 5; } five(); after = 1'), null, 'terminated');
+            assertEq(debuggee.after, 0, 'at the pop');
+            dbg.onEnterFrame = undefined;
+            assertEq(g.executeInGlobal('after + 1').return, 1, 'runs after');
+            ",
+        );
+    });
+}
+
+#[test]
+fn two_emulations() {
+    with_globals(|cx, global, debuggee, other| unsafe {
+        eval(
+            cx,
+            global,
+            "var dbgA = recordHookErrors(new Debugger(debuggee)), pops = 0;
+             dbgA.onEnterFrame = f => { if (f.type === 'call') f.onPop = () => { pops++; }; };",
+        );
+        {
+            let mut realm = AutoRealm::new_from_handle(cx, other);
+            let (other_global, cx) = realm.global_and_reborrow();
+            assert!(JS_DefineDebuggerObject(cx, other_global));
+            set_global(cx, other_global, c"debuggee", debuggee.get());
+            eval(
+                cx,
+                other_global,
+                "var dbgB = new Debugger(debuggee);
+                 dbgB.onEnterFrame = f => { if (f.type === 'call') { f.onStep = () => {}; f.onStep = undefined; } };",
+            );
+        }
+        eval_in(
+            cx,
+            debuggee,
+            "function two() { let x = 1; x++; return x; } two()",
+            c"https://example.com/t.js",
+            None,
+        )
+        .unwrap();
+        check(
+            cx,
+            global,
+            "assertEq(pops, 1, 'the other emulation keeps the hooks of this one');",
+        );
+    });
+}
+
+#[test]
+fn positions_of_long_lines() {
+    with_globals(|cx, global, debuggee, _| {
+        eval(
+            cx,
+            global,
+            "var dbg = recordHookErrors(new Debugger(debuggee)), scripts = [];
+             dbg.onNewScript = s => scripts.push(s);",
+        );
+        // A minified script: one line of 200 KB, with a surrogate pair.
+        let body: String = (0..20_000).map(|i| format!("a += {};", i % 10)).collect();
+        let source =
+            format!("var s = '💖'; function big() {{ var a = 0; {body} return a; }} big();");
+        eval_in(cx, debuggee, &source, c"https://example.com/min.js", None).unwrap();
+        let start = std::time::Instant::now();
+        check(
+            cx,
+            global,
+            "
+            const [big] = scripts[0].getChildScripts();
+            const positions = big.getPossibleBreakpoints();
+            assertEq(positions.length > 20000, true, 'positions');
+            assertEq(positions[0].columnNumber, scripts[0].source.text.indexOf('0; a') + 1, 'UTF-16 columns');
+            ",
+        );
+        assert!(
+            start.elapsed().as_secs() < 10,
+            "linear in the line length: {:?}",
+            start.elapsed()
         );
     });
 }

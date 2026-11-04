@@ -32,6 +32,7 @@ struct Stencil {
 
 struct ScriptSource {
     url: CString,
+    lineno: u32,
     text: Box<[u8]>,
     introduction_type: Option<&'static CStr>,
 }
@@ -120,6 +121,7 @@ pub(crate) unsafe fn CompileGlobalScriptToStencil_C(
             muted_errors: options.base._base.mutedErrors_,
             source: ScriptSource {
                 url: options.filename.clone(),
+                lineno: options.base.lineno,
                 text: units(srcBuf).into(),
                 // Introduction types are static strings.
                 introduction_type: (!options.base._base.introductionType.is_null())
@@ -252,18 +254,45 @@ pub(crate) unsafe fn InstantiateGlobalStencil(
         0
     };
     let bytecode = &stencil.bytecode;
-    let script = q::JS_ReadScript(cx.qctx(), bytecode.as_ptr(), bytecode.len(), flags);
+    let source = &stencil.source;
+    let mut script = q::JS_UNDEFINED;
+    if cx.debugger.is_active() {
+        // The parser records statement positions and sourceURL directives for debuggers only
+        // while they are active, so the script is compiled again here.
+        let buf = source_buffer(source.lineno, source.text.as_ptr(), source.text.len());
+        script = q::JS_Eval(
+            cx.qctx(),
+            buf.as_ptr() as *const c_char,
+            buf.len() - 1,
+            source.url.as_ptr(),
+            flags | (q::JS_EVAL_TYPE_GLOBAL | q::JS_EVAL_FLAG_COMPILE_ONLY) as i32,
+        );
+        // Compiling here can fail where the compiling thread succeeded, with less stack left: the
+        // bytecode then, with QuickJS's positions.
+        if q::JS_IsException(script) != 0 {
+            q::JS_FreeValue(cx.qctx(), q::JS_GetException(cx.qctx()));
+            script = q::JS_UNDEFINED;
+        }
+    }
+    if script.tag() == q::JS_TAG_UNDEFINED {
+        script = q::JS_ReadScript(cx.qctx(), bytecode.as_ptr(), bytecode.len(), flags);
+    }
     if q::JS_IsException(script) != 0 {
         return ptr::null_mut();
     }
-    let source = &stencil.source;
-    super::new_script(
+    // A termination of a hook requests the interrupt again, which terminates the script when it
+    // runs.
+    if super::new_script(
         cx,
         script,
         &source.url,
         &source.text,
         source.introduction_type.map_or(ptr::null(), CStr::as_ptr),
-    );
+        source.lineno,
+    ) < 0
+    {
+        super::reinterrupt(cx, cx.qctx());
+    }
     cx.adopt(script).asBits_ as usize as *mut root::JSScript
 }
 

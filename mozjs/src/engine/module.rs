@@ -468,13 +468,18 @@ unsafe fn compile_module(
     }
     if cx.debugger.is_active() {
         let code = q::JS_GetModuleScript(qctx, module.ptr() as *mut q::JSModuleDef);
-        super::new_script(
+        // A termination of a hook requests the interrupt again.
+        if super::new_script(
             cx,
             code,
             &options.filename,
             text,
             options.base._base.introductionType,
-        );
+            options.base.lineno,
+        ) < 0
+        {
+            super::reinterrupt(cx, qctx);
+        }
         q::JS_FreeValue(qctx, code);
     }
     new_module_object(cx, module, ModuleKind::JavaScript)
