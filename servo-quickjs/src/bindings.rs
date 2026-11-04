@@ -1959,6 +1959,32 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn JS_GetScriptRealm(script: JSValue) -> *mut JSContext;
 }
+pub type JSBreakpointHandler = ::std::option::Option<
+    unsafe extern "C" fn(
+        ctx: *mut JSContext,
+        script: JSValue,
+        pc: u32,
+        opaque: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int,
+>;
+unsafe extern "C" {
+    pub fn JS_SetBreakpointHandler(
+        rt: *mut JSRuntime,
+        handler: JSBreakpointHandler,
+        opaque: *mut ::std::os::raw::c_void,
+    );
+}
+unsafe extern "C" {
+    pub fn JS_SetBreakpoint(ctx: *mut JSContext, script: JSValue, pc: u32)
+        -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn JS_ClearBreakpoint(
+        rt: *mut JSRuntime,
+        script: JSValue,
+        pc: u32,
+    ) -> ::std::os::raw::c_int;
+}
 pub type JSImportMetaHook = ::std::option::Option<
     unsafe extern "C" fn(
         ctx: *mut JSContext,

@@ -401,6 +401,18 @@ struct JSRuntime {
     uint32_t proto_epoch;
     /* Servo: called when a context is freed */
     JSContextFinalizer *context_finalizer;
+    /* Servo: the breakpoints of the functions that have some, a hash table by
+       function, and the handler called when one runs (Q45) */
+    struct JSBreakpoints **breakpoint_hash;
+    uint32_t breakpoint_hash_size; /* a power of 2, or 0 */
+    uint32_t breakpoint_function_count;
+    /* Servo: where the last walk over the instructions of a function stopped, at
+       the start of an instruction, and the start of the one before (Q45) */
+    struct JSFunctionBytecode *insn_walk_b;
+    uint32_t insn_walk_pos;
+    uint32_t insn_walk_prev;
+    JSBreakpointHandler *breakpoint_handler;
+    void *breakpoint_opaque;
 
     JSModuleNormalizeFunc *module_normalize_func;
     BOOL module_loader_has_attr;
@@ -767,7 +779,8 @@ typedef struct JSFunctionBytecode {
     uint8_t has_debug : 1;
     uint8_t read_only_bytecode : 1;
     uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
-    /* XXX: 10 bits available */
+    uint8_t has_breakpoints : 1; /* Servo: some instructions are OP_breakpoint (Q45) */
+    /* XXX: 9 bits available */
     uint8_t *byte_code_buf; /* (self pointer) */
     int byte_code_len;
     JSAtom func_name;
@@ -2626,6 +2639,8 @@ void JS_FreeRuntime(JSRuntime *rt)
 #endif
     assert(list_empty(&rt->gc_obj_list));
     assert(list_empty(&rt->weakref_list));
+    assert(rt->breakpoint_function_count == 0);
+    js_free_rt(rt, rt->breakpoint_hash);
 
     /* free the classes */
     for(i = 0; i < rt->class_count; i++) {
@@ -18233,6 +18248,135 @@ typedef enum {
 #define FUNC_RET_YIELD_STAR    2
 #define FUNC_RET_INITIAL_YIELD 3
 
+/* Servo: breakpoints (Q45). An instruction with a breakpoint starts with
+   OP_breakpoint instead of its opcode, which the runtime keeps in the breakpoints
+   of its function. */
+typedef struct JSBreakpoint {
+    uint32_t pc;
+    uint8_t opcode;
+} JSBreakpoint;
+
+typedef struct JSBreakpoints {
+    struct JSBreakpoints *hash_next;
+    JSFunctionBytecode *b;
+    int count;
+    int size;
+    JSBreakpoint *tab; /* sorted by pc */
+} JSBreakpoints;
+
+static uint32_t js_breakpoint_hash(JSRuntime *rt, JSFunctionBytecode *b)
+{
+    return (uint32_t)(((uintptr_t)b >> 4) * 2654435761u) & (rt->breakpoint_hash_size - 1);
+}
+
+static JSBreakpoints *js_get_breakpoints(JSRuntime *rt, JSFunctionBytecode *b)
+{
+    JSBreakpoints *bps;
+
+    if (!b->has_breakpoints)
+        return NULL;
+    for(bps = rt->breakpoint_hash[js_breakpoint_hash(rt, b)]; bps; bps = bps->hash_next) {
+        if (bps->b == b)
+            return bps;
+    }
+    return NULL;
+}
+
+/* the index of the first breakpoint of 'bps' at 'pc' or after it */
+static int js_breakpoint_index(JSBreakpoints *bps, uint32_t pc)
+{
+    int lo = 0, hi = bps->count, mid;
+
+    while (lo < hi) {
+        mid = (lo + hi) >> 1;
+        if (bps->tab[mid].pc < pc)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo;
+}
+
+/* the opcode of the instruction at 'pc', under its breakpoint if it has one;
+   OP_invalid for an OP_breakpoint byte without a breakpoint */
+static int js_breakpoint_opcode(JSRuntime *rt, JSFunctionBytecode *b, uint32_t pc)
+{
+    int op = b->byte_code_buf[pc], i;
+    JSBreakpoints *bps;
+
+    if (op != OP_breakpoint)
+        return op;
+    bps = js_get_breakpoints(rt, b);
+    if (bps) {
+        i = js_breakpoint_index(bps, pc);
+        if (i < bps->count && bps->tab[i].pc == pc)
+            return bps->tab[i].opcode;
+    }
+    return OP_invalid;
+}
+
+static JSBreakpoints *js_new_breakpoints(JSContext *ctx, JSFunctionBytecode *b)
+{
+    JSRuntime *rt = ctx->rt;
+    JSBreakpoints *bps, **hash, *next;
+    uint32_t i, size, h;
+
+    if (rt->breakpoint_function_count >= rt->breakpoint_hash_size) {
+        size = max_int(16, rt->breakpoint_hash_size * 2);
+        hash = js_mallocz(ctx, sizeof(hash[0]) * size);
+        if (!hash)
+            return NULL;
+        for(i = 0; i < rt->breakpoint_hash_size; i++) {
+            for(bps = rt->breakpoint_hash[i]; bps; bps = next) {
+                next = bps->hash_next;
+                h = (uint32_t)(((uintptr_t)bps->b >> 4) * 2654435761u) & (size - 1);
+                bps->hash_next = hash[h];
+                hash[h] = bps;
+            }
+        }
+        js_free(ctx, rt->breakpoint_hash);
+        rt->breakpoint_hash = hash;
+        rt->breakpoint_hash_size = size;
+    }
+    bps = js_mallocz(ctx, sizeof(*bps));
+    if (!bps)
+        return NULL;
+    bps->b = b;
+    h = js_breakpoint_hash(rt, b);
+    bps->hash_next = rt->breakpoint_hash[h];
+    rt->breakpoint_hash[h] = bps;
+    rt->breakpoint_function_count++;
+    b->has_breakpoints = TRUE;
+    return bps;
+}
+
+static void js_delete_breakpoints(JSRuntime *rt, JSBreakpoints *bps)
+{
+    JSBreakpoints **pbps;
+
+    for(pbps = &rt->breakpoint_hash[js_breakpoint_hash(rt, bps->b)]; *pbps != bps;
+        pbps = &(*pbps)->hash_next)
+        continue;
+    *pbps = bps->hash_next;
+    rt->breakpoint_function_count--;
+    bps->b->has_breakpoints = FALSE;
+    js_free_rt(rt, bps->tab);
+    js_free_rt(rt, bps);
+}
+
+/* restores the instructions of 'b' and forgets its breakpoints */
+static void js_free_breakpoints(JSRuntime *rt, JSFunctionBytecode *b)
+{
+    JSBreakpoints *bps = js_get_breakpoints(rt, b);
+    int i;
+
+    if (!bps)
+        return;
+    for(i = 0; i < bps->count; i++)
+        b->byte_code_buf[bps->tab[i].pc] = bps->tab[i].opcode;
+    js_delete_breakpoints(rt, bps);
+}
+
 #ifdef OPCODE_ASM_LABEL
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-label"
@@ -18255,7 +18399,8 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     size_t alloca_size;
 
 #if !DIRECT_DISPATCH
-#define SWITCH(pc)      switch (opcode = *pc++)
+#define SWITCH(pc)      opcode = *pc++; redispatch: switch (opcode)
+#define REDISPATCH(op)  do { opcode = (op); goto redispatch; } while (0)
 #define CASE(op)        case op
 #define DEFAULT         default
 #define BREAK           break
@@ -18271,6 +18416,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         [ OP_COUNT ... 255 ] = &&case_default
     };
 #define SWITCH(pc)      goto *dispatch_table[opcode = *pc++];
+#define REDISPATCH(op)  goto *dispatch_table[opcode = (op)]
 #ifdef OPCODE_ASM_LABEL
 #define CASE(op)        case_ ## op: asm volatile("label_" #op ":\n.globl label_" #op); dummy_case_ ## op
 #else
@@ -21110,6 +21256,20 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 
         CASE(OP_nop):
             BREAK;
+        CASE(OP_breakpoint): /* Servo (Q45) */
+            {
+                uint32_t pos = pc - 1 - b->byte_code_buf;
+                int op = js_breakpoint_opcode(rt, b, pos);
+                sf->cur_pc = pc;
+                if (op != OP_invalid && rt->breakpoint_handler &&
+                    rt->breakpoint_handler(ctx, JS_MKPTR(JS_TAG_FUNCTION_BYTECODE, b),
+                                           pos, rt->breakpoint_opaque) < 0) {
+                    if (!JS_HasException(ctx))
+                        JS_ThrowInternalError(ctx, "breakpoint handler failed");
+                    goto exception;
+                }
+                REDISPATCH(op);
+            }
         CASE(OP_is_undefined_or_null):
             if (JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_UNDEFINED ||
                 JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_NULL) {
@@ -37097,6 +37257,11 @@ static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
                JS_AtomGetStrRT(rt, buf, sizeof(buf), b->func_name));
     }
 #endif
+    /* Servo: free_bytecode_atoms() reads the original opcodes */
+    if (b->has_breakpoints)
+        js_free_breakpoints(rt, b);
+    if (rt->insn_walk_b == b)
+        rt->insn_walk_b = NULL;
     if (b->byte_code_buf)
         free_bytecode_atoms(rt, b->byte_code_buf, b->byte_code_len, TRUE);
 
@@ -38380,7 +38545,7 @@ typedef enum BCTagEnum {
     BC_TAG_OBJECT_REFERENCE,
 } BCTagEnum;
 
-#define BC_VERSION 5
+#define BC_VERSION 6 /* Servo: OP_breakpoint renumbered the opcodes after it (Q45) */
 
 typedef struct BCWriterState {
     JSContext *ctx;
@@ -38592,10 +38757,9 @@ static void bc_byte_swap(uint8_t *bc_buf, int bc_len)
     }
 }
 
-static int JS_WriteFunctionBytecode(BCWriterState *s,
-                                    const uint8_t *bc_buf1, int bc_len)
+static int JS_WriteFunctionBytecode(BCWriterState *s, JSFunctionBytecode *b)
 {
-    int pos, len, op;
+    int pos, len, op, bc_len = b->byte_code_len;
     JSAtom atom;
     uint8_t *bc_buf;
     uint32_t val;
@@ -38603,11 +38767,13 @@ static int JS_WriteFunctionBytecode(BCWriterState *s,
     bc_buf = js_malloc(s->ctx, bc_len);
     if (!bc_buf)
         return -1;
-    memcpy(bc_buf, bc_buf1, bc_len);
+    memcpy(bc_buf, b->byte_code_buf, bc_len);
 
     pos = 0;
     while (pos < bc_len) {
-        op = bc_buf[pos];
+        /* Servo: without the breakpoints (Q45) */
+        op = js_breakpoint_opcode(s->ctx->rt, b, pos);
+        bc_buf[pos] = op;
         len = short_opcode_info(op).size;
         switch(short_opcode_info(op).fmt) {
         case OP_FMT_atom:
@@ -38766,7 +38932,7 @@ static int JS_WriteFunctionTag(BCWriterState *s, JSValueConst obj)
         bc_put_u16(s, flags);
     }
 
-    if (JS_WriteFunctionBytecode(s, b->byte_code_buf, b->byte_code_len))
+    if (JS_WriteFunctionBytecode(s, b))
         goto fail;
 
     if (b->has_debug) {
@@ -63560,6 +63726,97 @@ JSContext *JS_GetScriptRealm(JSValueConst script)
     if (JS_VALUE_GET_TAG(script) != JS_TAG_FUNCTION_BYTECODE)
         return NULL;
     return ((JSFunctionBytecode *)JS_VALUE_GET_PTR(script))->realm;
+}
+
+/* Servo: breakpoints (Q45) */
+
+void JS_SetBreakpointHandler(JSRuntime *rt, JSBreakpointHandler *handler, void *opaque)
+{
+    rt->breakpoint_handler = handler;
+    rt->breakpoint_opaque = opaque;
+}
+
+static JSFunctionBytecode *js_script_bytecode(JSValueConst script)
+{
+    if (JS_VALUE_GET_TAG(script) != JS_TAG_FUNCTION_BYTECODE)
+        return NULL;
+    return JS_VALUE_GET_PTR(script);
+}
+
+/* whether an instruction of 'b' starts at 'pc'. The walk goes on from where the
+   last one stopped in the same function, so that ascending queries are linear. */
+static BOOL js_is_instruction(JSRuntime *rt, JSFunctionBytecode *b, uint32_t pc)
+{
+    uint32_t pos = 0, prev = 0;
+
+    if (pc >= b->byte_code_len)
+        return FALSE;
+    if (rt->insn_walk_b == b) {
+        if (rt->insn_walk_pos <= pc)
+            pos = prev = rt->insn_walk_pos;
+        else if (rt->insn_walk_prev <= pc)
+            return pc == rt->insn_walk_prev; /* in the instruction before */
+    }
+    while (pos < pc) {
+        prev = pos;
+        pos += short_opcode_info(js_breakpoint_opcode(rt, b, pos)).size;
+    }
+    rt->insn_walk_b = b;
+    rt->insn_walk_pos = pos;
+    rt->insn_walk_prev = prev;
+    return pos == pc;
+}
+
+int JS_SetBreakpoint(JSContext *ctx, JSValueConst script, uint32_t pc)
+{
+    JSRuntime *rt = ctx->rt;
+    JSFunctionBytecode *b = js_script_bytecode(script);
+    JSBreakpoints *bps;
+    int i;
+
+    if (!b || b->read_only_bytecode || !js_is_instruction(rt, b, pc))
+        return -1;
+    bps = js_get_breakpoints(rt, b);
+    if (!bps) {
+        bps = js_new_breakpoints(ctx, b);
+        if (!bps)
+            return -1;
+    }
+    i = js_breakpoint_index(bps, pc);
+    if (i < bps->count && bps->tab[i].pc == pc)
+        return 0;
+    if (js_resize_array(ctx, (void **)&bps->tab, sizeof(bps->tab[0]), &bps->size,
+                        bps->count + 1)) {
+        if (bps->count == 0)
+            js_delete_breakpoints(rt, bps);
+        return -1;
+    }
+    memmove(&bps->tab[i + 1], &bps->tab[i], sizeof(bps->tab[0]) * (bps->count - i));
+    bps->tab[i].pc = pc;
+    bps->tab[i].opcode = b->byte_code_buf[pc];
+    bps->count++;
+    b->byte_code_buf[pc] = OP_breakpoint;
+    return 0;
+}
+
+int JS_ClearBreakpoint(JSRuntime *rt, JSValueConst script, uint32_t pc)
+{
+    JSFunctionBytecode *b = js_script_bytecode(script);
+    JSBreakpoints *bps;
+    int i;
+
+    bps = b ? js_get_breakpoints(rt, b) : NULL;
+    if (!bps)
+        return -1;
+    i = js_breakpoint_index(bps, pc);
+    if (i >= bps->count || bps->tab[i].pc != pc)
+        return -1;
+    b->byte_code_buf[pc] = bps->tab[i].opcode;
+    bps->count--;
+    memmove(&bps->tab[i], &bps->tab[i + 1], sizeof(bps->tab[0]) * (bps->count - i));
+    if (bps->count == 0)
+        js_delete_breakpoints(rt, bps);
+    return 0;
 }
 
 /* Marks a settled promise as handled, telling the rejection tracker like

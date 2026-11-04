@@ -1216,6 +1216,18 @@ JSModuleDef *JS_GetScriptModule(JSValueConst script);
 /* Servo: the realm whose global a script's code runs in (the realm it was
    compiled in), or NULL if 'script' is not code. */
 JSContext *JS_GetScriptRealm(JSValueConst script);
+/* Servo (debugger): breakpoints (Q45). JS_SetBreakpoint() makes the instruction at
+   offset 'pc' of 'script' (JS_TAG_FUNCTION_BYTECODE) call the breakpoint handler
+   before it runs; JS_ClearBreakpoint() removes the breakpoint. They return -1 if 'pc'
+   is not the start of an instruction or has no breakpoint (and when out of memory,
+   with an exception pending), else 0. The handler runs with the frame of the
+   instruction as the current frame, and returns 0 to run the instruction, or -1 to
+   throw the pending exception there instead (an uncatchable one to terminate). */
+typedef int JSBreakpointHandler(JSContext *ctx, JSValueConst script, uint32_t pc,
+                                void *opaque);
+void JS_SetBreakpointHandler(JSRuntime *rt, JSBreakpointHandler *handler, void *opaque);
+int JS_SetBreakpoint(JSContext *ctx, JSValueConst script, uint32_t pc);
+int JS_ClearBreakpoint(JSRuntime *rt, JSValueConst script, uint32_t pc);
 /* Servo: host hooks. The import.meta hook populates the new import.meta object of
    'm'. The dynamic import hook replaces the module loader for import(): 'm' is
    the module of the calling code, or NULL for script code, whose host-defined
