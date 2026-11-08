@@ -7468,8 +7468,8 @@ pub mod root {
         }
         #[allow(clippy::unnecessary_operation, clippy::identity_op)]
         const _: () = {
-            ["Size of template specialization: GCPolicy_open0__bindgen_ty_id_152552_open1_array0_char_FreePolicy_close1_close0"] [:: std :: mem :: size_of :: < root :: JS :: GCPolicy > () - 1usize] ;
-            ["Align of template specialization: GCPolicy_open0__bindgen_ty_id_152552_open1_array0_char_FreePolicy_close1_close0"] [:: std :: mem :: align_of :: < root :: JS :: GCPolicy > () - 1usize] ;
+            ["Size of template specialization: GCPolicy_open0__bindgen_ty_id_152750_open1_array0_char_FreePolicy_close1_close0"] [:: std :: mem :: size_of :: < root :: JS :: GCPolicy > () - 1usize] ;
+            ["Align of template specialization: GCPolicy_open0__bindgen_ty_id_152750_open1_array0_char_FreePolicy_close1_close0"] [:: std :: mem :: align_of :: < root :: JS :: GCPolicy > () - 1usize] ;
         };
         #[allow(clippy::unnecessary_operation, clippy::identity_op)]
         const _: () = {
@@ -12094,14 +12094,47 @@ pub mod root {
                 }
             }
             #[inline]
-            pub fn disableIon_(&self) -> bool {
+            pub fn wasmDisablesDenormals_(&self) -> bool {
                 unsafe { ::std::mem::transmute(self._bitfield_1.get(5usize, 1u8) as u8) }
+            }
+            #[inline]
+            pub fn set_wasmDisablesDenormals_(&mut self, val: bool) {
+                unsafe {
+                    let val: u8 = ::std::mem::transmute(val);
+                    self._bitfield_1.set(5usize, 1u8, val as u64)
+                }
+            }
+            #[inline]
+            pub unsafe fn wasmDisablesDenormals__raw(this: *const Self) -> bool {
+                unsafe {
+                    ::std::mem::transmute(<root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_get(
+                        ::std::ptr::addr_of!((*this)._bitfield_1),
+                        5usize,
+                        1u8,
+                    ) as u8)
+                }
+            }
+            #[inline]
+            pub unsafe fn set_wasmDisablesDenormals__raw(this: *mut Self, val: bool) {
+                unsafe {
+                    let val: u8 = ::std::mem::transmute(val);
+                    <root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_set(
+                        ::std::ptr::addr_of_mut!((*this)._bitfield_1),
+                        5usize,
+                        1u8,
+                        val as u64,
+                    )
+                }
+            }
+            #[inline]
+            pub fn disableIon_(&self) -> bool {
+                unsafe { ::std::mem::transmute(self._bitfield_1.get(6usize, 1u8) as u8) }
             }
             #[inline]
             pub fn set_disableIon_(&mut self, val: bool) {
                 unsafe {
                     let val: u8 = ::std::mem::transmute(val);
-                    self._bitfield_1.set(5usize, 1u8, val as u64)
+                    self._bitfield_1.set(6usize, 1u8, val as u64)
                 }
             }
             #[inline]
@@ -12109,7 +12142,7 @@ pub mod root {
                 unsafe {
                     ::std::mem::transmute(<root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_get(
                         ::std::ptr::addr_of!((*this)._bitfield_1),
-                        5usize,
+                        6usize,
                         1u8,
                     ) as u8)
                 }
@@ -12120,7 +12153,7 @@ pub mod root {
                     let val: u8 = ::std::mem::transmute(val);
                     <root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_set(
                         ::std::ptr::addr_of_mut!((*this)._bitfield_1),
-                        5usize,
+                        6usize,
                         1u8,
                         val as u64,
                     )
@@ -12128,13 +12161,13 @@ pub mod root {
             }
             #[inline]
             pub fn disableEvalSecurityChecks_(&self) -> bool {
-                unsafe { ::std::mem::transmute(self._bitfield_1.get(6usize, 1u8) as u8) }
+                unsafe { ::std::mem::transmute(self._bitfield_1.get(7usize, 1u8) as u8) }
             }
             #[inline]
             pub fn set_disableEvalSecurityChecks_(&mut self, val: bool) {
                 unsafe {
                     let val: u8 = ::std::mem::transmute(val);
-                    self._bitfield_1.set(6usize, 1u8, val as u64)
+                    self._bitfield_1.set(7usize, 1u8, val as u64)
                 }
             }
             #[inline]
@@ -12142,7 +12175,7 @@ pub mod root {
                 unsafe {
                     ::std::mem::transmute(<root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_get(
                         ::std::ptr::addr_of!((*this)._bitfield_1),
-                        6usize,
+                        7usize,
                         1u8,
                     ) as u8)
                 }
@@ -12153,7 +12186,7 @@ pub mod root {
                     let val: u8 = ::std::mem::transmute(val);
                     <root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_set(
                         ::std::ptr::addr_of_mut!((*this)._bitfield_1),
-                        6usize,
+                        7usize,
                         1u8,
                         val as u64,
                     )
@@ -12161,13 +12194,13 @@ pub mod root {
             }
             #[inline]
             pub fn disableFilenameSecurityChecks_(&self) -> bool {
-                unsafe { ::std::mem::transmute(self._bitfield_1.get(7usize, 1u8) as u8) }
+                unsafe { ::std::mem::transmute(self._bitfield_1.get(8usize, 1u8) as u8) }
             }
             #[inline]
             pub fn set_disableFilenameSecurityChecks_(&mut self, val: bool) {
                 unsafe {
                     let val: u8 = ::std::mem::transmute(val);
-                    self._bitfield_1.set(7usize, 1u8, val as u64)
+                    self._bitfield_1.set(8usize, 1u8, val as u64)
                 }
             }
             #[inline]
@@ -12175,7 +12208,7 @@ pub mod root {
                 unsafe {
                     ::std::mem::transmute(<root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_get(
                         ::std::ptr::addr_of!((*this)._bitfield_1),
-                        7usize,
+                        8usize,
                         1u8,
                     ) as u8)
                 }
@@ -12186,7 +12219,7 @@ pub mod root {
                     let val: u8 = ::std::mem::transmute(val);
                     <root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_set(
                         ::std::ptr::addr_of_mut!((*this)._bitfield_1),
-                        7usize,
+                        8usize,
                         1u8,
                         val as u64,
                     )
@@ -12194,13 +12227,13 @@ pub mod root {
             }
             #[inline]
             pub fn asyncStack_(&self) -> bool {
-                unsafe { ::std::mem::transmute(self._bitfield_1.get(8usize, 1u8) as u8) }
+                unsafe { ::std::mem::transmute(self._bitfield_1.get(9usize, 1u8) as u8) }
             }
             #[inline]
             pub fn set_asyncStack_(&mut self, val: bool) {
                 unsafe {
                     let val: u8 = ::std::mem::transmute(val);
-                    self._bitfield_1.set(8usize, 1u8, val as u64)
+                    self._bitfield_1.set(9usize, 1u8, val as u64)
                 }
             }
             #[inline]
@@ -12208,7 +12241,7 @@ pub mod root {
                 unsafe {
                     ::std::mem::transmute(<root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_get(
                         ::std::ptr::addr_of!((*this)._bitfield_1),
-                        8usize,
+                        9usize,
                         1u8,
                     ) as u8)
                 }
@@ -12219,7 +12252,7 @@ pub mod root {
                     let val: u8 = ::std::mem::transmute(val);
                     <root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_set(
                         ::std::ptr::addr_of_mut!((*this)._bitfield_1),
-                        8usize,
+                        9usize,
                         1u8,
                         val as u64,
                     )
@@ -12227,13 +12260,13 @@ pub mod root {
             }
             #[inline]
             pub fn asyncStackCaptureDebuggeeOnly_(&self) -> bool {
-                unsafe { ::std::mem::transmute(self._bitfield_1.get(9usize, 1u8) as u8) }
+                unsafe { ::std::mem::transmute(self._bitfield_1.get(10usize, 1u8) as u8) }
             }
             #[inline]
             pub fn set_asyncStackCaptureDebuggeeOnly_(&mut self, val: bool) {
                 unsafe {
                     let val: u8 = ::std::mem::transmute(val);
-                    self._bitfield_1.set(9usize, 1u8, val as u64)
+                    self._bitfield_1.set(10usize, 1u8, val as u64)
                 }
             }
             #[inline]
@@ -12241,7 +12274,7 @@ pub mod root {
                 unsafe {
                     ::std::mem::transmute(<root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_get(
                         ::std::ptr::addr_of!((*this)._bitfield_1),
-                        9usize,
+                        10usize,
                         1u8,
                     ) as u8)
                 }
@@ -12252,7 +12285,7 @@ pub mod root {
                     let val: u8 = ::std::mem::transmute(val);
                     <root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_set(
                         ::std::ptr::addr_of_mut!((*this)._bitfield_1),
-                        9usize,
+                        10usize,
                         1u8,
                         val as u64,
                     )
@@ -12260,13 +12293,13 @@ pub mod root {
             }
             #[inline]
             pub fn throwOnDebuggeeWouldRun_(&self) -> bool {
-                unsafe { ::std::mem::transmute(self._bitfield_1.get(10usize, 1u8) as u8) }
+                unsafe { ::std::mem::transmute(self._bitfield_1.get(11usize, 1u8) as u8) }
             }
             #[inline]
             pub fn set_throwOnDebuggeeWouldRun_(&mut self, val: bool) {
                 unsafe {
                     let val: u8 = ::std::mem::transmute(val);
-                    self._bitfield_1.set(10usize, 1u8, val as u64)
+                    self._bitfield_1.set(11usize, 1u8, val as u64)
                 }
             }
             #[inline]
@@ -12274,7 +12307,7 @@ pub mod root {
                 unsafe {
                     ::std::mem::transmute(<root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_get(
                         ::std::ptr::addr_of!((*this)._bitfield_1),
-                        10usize,
+                        11usize,
                         1u8,
                     ) as u8)
                 }
@@ -12285,7 +12318,7 @@ pub mod root {
                     let val: u8 = ::std::mem::transmute(val);
                     <root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_set(
                         ::std::ptr::addr_of_mut!((*this)._bitfield_1),
-                        10usize,
+                        11usize,
                         1u8,
                         val as u64,
                     )
@@ -12293,13 +12326,13 @@ pub mod root {
             }
             #[inline]
             pub fn dumpStackOnDebuggeeWouldRun_(&self) -> bool {
-                unsafe { ::std::mem::transmute(self._bitfield_1.get(11usize, 1u8) as u8) }
+                unsafe { ::std::mem::transmute(self._bitfield_1.get(12usize, 1u8) as u8) }
             }
             #[inline]
             pub fn set_dumpStackOnDebuggeeWouldRun_(&mut self, val: bool) {
                 unsafe {
                     let val: u8 = ::std::mem::transmute(val);
-                    self._bitfield_1.set(11usize, 1u8, val as u64)
+                    self._bitfield_1.set(12usize, 1u8, val as u64)
                 }
             }
             #[inline]
@@ -12307,7 +12340,7 @@ pub mod root {
                 unsafe {
                     ::std::mem::transmute(<root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_get(
                         ::std::ptr::addr_of!((*this)._bitfield_1),
-                        11usize,
+                        12usize,
                         1u8,
                     ) as u8)
                 }
@@ -12318,7 +12351,7 @@ pub mod root {
                     let val: u8 = ::std::mem::transmute(val);
                     <root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_set(
                         ::std::ptr::addr_of_mut!((*this)._bitfield_1),
-                        11usize,
+                        12usize,
                         1u8,
                         val as u64,
                     )
@@ -12326,13 +12359,13 @@ pub mod root {
             }
             #[inline]
             pub fn fuzzing_(&self) -> bool {
-                unsafe { ::std::mem::transmute(self._bitfield_1.get(12usize, 1u8) as u8) }
+                unsafe { ::std::mem::transmute(self._bitfield_1.get(13usize, 1u8) as u8) }
             }
             #[inline]
             pub fn set_fuzzing_(&mut self, val: bool) {
                 unsafe {
                     let val: u8 = ::std::mem::transmute(val);
-                    self._bitfield_1.set(12usize, 1u8, val as u64)
+                    self._bitfield_1.set(13usize, 1u8, val as u64)
                 }
             }
             #[inline]
@@ -12340,7 +12373,7 @@ pub mod root {
                 unsafe {
                     ::std::mem::transmute(<root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_get(
                         ::std::ptr::addr_of!((*this)._bitfield_1),
-                        12usize,
+                        13usize,
                         1u8,
                     ) as u8)
                 }
@@ -12351,7 +12384,7 @@ pub mod root {
                     let val: u8 = ::std::mem::transmute(val);
                     <root::__BindgenBitfieldUnit<[u8; 2usize]>>::raw_set(
                         ::std::ptr::addr_of_mut!((*this)._bitfield_1),
-                        12usize,
+                        13usize,
                         1u8,
                         val as u64,
                     )
@@ -12364,6 +12397,7 @@ pub mod root {
                 wasmBaseline_: bool,
                 wasmIon_: bool,
                 testWasmAwaitTier2_: bool,
+                wasmDisablesDenormals_: bool,
                 disableIon_: bool,
                 disableEvalSecurityChecks_: bool,
                 disableFilenameSecurityChecks_: bool,
@@ -12398,39 +12432,44 @@ pub mod root {
                     testWasmAwaitTier2_ as u64
                 });
                 __bindgen_bitfield_unit.set(5usize, 1u8, {
+                    let wasmDisablesDenormals_: u8 =
+                        unsafe { ::std::mem::transmute(wasmDisablesDenormals_) };
+                    wasmDisablesDenormals_ as u64
+                });
+                __bindgen_bitfield_unit.set(6usize, 1u8, {
                     let disableIon_: u8 = unsafe { ::std::mem::transmute(disableIon_) };
                     disableIon_ as u64
                 });
-                __bindgen_bitfield_unit.set(6usize, 1u8, {
+                __bindgen_bitfield_unit.set(7usize, 1u8, {
                     let disableEvalSecurityChecks_: u8 =
                         unsafe { ::std::mem::transmute(disableEvalSecurityChecks_) };
                     disableEvalSecurityChecks_ as u64
                 });
-                __bindgen_bitfield_unit.set(7usize, 1u8, {
+                __bindgen_bitfield_unit.set(8usize, 1u8, {
                     let disableFilenameSecurityChecks_: u8 =
                         unsafe { ::std::mem::transmute(disableFilenameSecurityChecks_) };
                     disableFilenameSecurityChecks_ as u64
                 });
-                __bindgen_bitfield_unit.set(8usize, 1u8, {
+                __bindgen_bitfield_unit.set(9usize, 1u8, {
                     let asyncStack_: u8 = unsafe { ::std::mem::transmute(asyncStack_) };
                     asyncStack_ as u64
                 });
-                __bindgen_bitfield_unit.set(9usize, 1u8, {
+                __bindgen_bitfield_unit.set(10usize, 1u8, {
                     let asyncStackCaptureDebuggeeOnly_: u8 =
                         unsafe { ::std::mem::transmute(asyncStackCaptureDebuggeeOnly_) };
                     asyncStackCaptureDebuggeeOnly_ as u64
                 });
-                __bindgen_bitfield_unit.set(10usize, 1u8, {
+                __bindgen_bitfield_unit.set(11usize, 1u8, {
                     let throwOnDebuggeeWouldRun_: u8 =
                         unsafe { ::std::mem::transmute(throwOnDebuggeeWouldRun_) };
                     throwOnDebuggeeWouldRun_ as u64
                 });
-                __bindgen_bitfield_unit.set(11usize, 1u8, {
+                __bindgen_bitfield_unit.set(12usize, 1u8, {
                     let dumpStackOnDebuggeeWouldRun_: u8 =
                         unsafe { ::std::mem::transmute(dumpStackOnDebuggeeWouldRun_) };
                     dumpStackOnDebuggeeWouldRun_ as u64
                 });
-                __bindgen_bitfield_unit.set(12usize, 1u8, {
+                __bindgen_bitfield_unit.set(13usize, 1u8, {
                     let fuzzing_: u8 = unsafe { ::std::mem::transmute(fuzzing_) };
                     fuzzing_ as u64
                 });
@@ -14905,6 +14944,112 @@ pub mod root {
                 cx: *mut root::JSContext,
                 stencil: *mut root::JS::Stencil,
                 result: root::JS::MutableHandle<root::JS::Value>,
+            ) -> bool;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS18NewFrontendContextEv"]
+            pub fn NewFrontendContext() -> *mut root::JS::FrontendContext;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS22DestroyFrontendContextEPN2js15FrontendContextE"]
+            pub fn DestroyFrontendContext(fc: *mut root::JS::FrontendContext);
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS19SetNativeStackQuotaEPN2js15FrontendContextEm"]
+            pub fn SetNativeStackQuota(
+                fc: *mut root::JS::FrontendContext,
+                stackSize: root::JS::NativeStackSize,
+            );
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS23ThreadStackQuotaForSizeEm"]
+            pub fn ThreadStackQuotaForSize(stackSize: usize) -> root::JS::NativeStackSize;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS17HadFrontendErrorsEPN2js15FrontendContextE"]
+            pub fn HadFrontendErrors(fc: *mut root::JS::FrontendContext) -> bool;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS36ConvertFrontendErrorsToRuntimeErrorsEP9JSContextPN2js15FrontendContextERKNS_22ReadOnlyCompileOptionsE"]
+            pub fn ConvertFrontendErrorsToRuntimeErrors(
+                cx: *mut root::JSContext,
+                fc: *mut root::JS::FrontendContext,
+                options: *const root::JS::ReadOnlyCompileOptions,
+            ) -> bool;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS22GetFrontendErrorReportEPN2js15FrontendContextERKNS_22ReadOnlyCompileOptionsE"]
+            pub fn GetFrontendErrorReport(
+                fc: *mut root::JS::FrontendContext,
+                options: *const root::JS::ReadOnlyCompileOptions,
+            ) -> *const root::JSErrorReport;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS23HadFrontendOverRecursedEPN2js15FrontendContextE"]
+            pub fn HadFrontendOverRecursed(fc: *mut root::JS::FrontendContext) -> bool;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS22HadFrontendOutOfMemoryEPN2js15FrontendContextE"]
+            pub fn HadFrontendOutOfMemory(fc: *mut root::JS::FrontendContext) -> bool;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS29HadFrontendAllocationOverflowEPN2js15FrontendContextE"]
+            pub fn HadFrontendAllocationOverflow(fc: *mut root::JS::FrontendContext) -> bool;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS19ClearFrontendErrorsEPN2js15FrontendContextE"]
+            pub fn ClearFrontendErrors(fc: *mut root::JS::FrontendContext);
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS23GetFrontendWarningCountEPN2js15FrontendContextE"]
+            pub fn GetFrontendWarningCount(fc: *mut root::JS::FrontendContext) -> usize;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS20GetFrontendWarningAtEPN2js15FrontendContextEmRKNS_22ReadOnlyCompileOptionsE"]
+            pub fn GetFrontendWarningAt(
+                fc: *mut root::JS::FrontendContext,
+                index: usize,
+                options: *const root::JS::ReadOnlyCompileOptions,
+            ) -> *const root::JSErrorReport;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS28CompileGlobalScriptToStencilEPN2js15FrontendContextERKNS_22ReadOnlyCompileOptionsERNS_10SourceTextIN7mozilla8Utf8UnitEEE"]
+            pub fn CompileGlobalScriptToStencil2(
+                fc: *mut root::JS::FrontendContext,
+                options: *const root::JS::ReadOnlyCompileOptions,
+                srcBuf: *mut root::JS::SourceText<root::mozilla::Utf8Unit>,
+            ) -> root::already_AddRefed<root::JS::Stencil>;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS28CompileGlobalScriptToStencilEPN2js15FrontendContextERKNS_22ReadOnlyCompileOptionsERNS_10SourceTextIDsEE"]
+            pub fn CompileGlobalScriptToStencil3(
+                fc: *mut root::JS::FrontendContext,
+                options: *const root::JS::ReadOnlyCompileOptions,
+                srcBuf: *mut root::JS::SourceText<u16>,
+            ) -> root::already_AddRefed<root::JS::Stencil>;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS28CompileModuleScriptToStencilEPN2js15FrontendContextERKNS_22ReadOnlyCompileOptionsERNS_10SourceTextIN7mozilla8Utf8UnitEEE"]
+            pub fn CompileModuleScriptToStencil2(
+                fc: *mut root::JS::FrontendContext,
+                options: *const root::JS::ReadOnlyCompileOptions,
+                srcBuf: *mut root::JS::SourceText<root::mozilla::Utf8Unit>,
+            ) -> root::already_AddRefed<root::JS::Stencil>;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS28CompileModuleScriptToStencilEPN2js15FrontendContextERKNS_22ReadOnlyCompileOptionsERNS_10SourceTextIDsEE"]
+            pub fn CompileModuleScriptToStencil3(
+                fc: *mut root::JS::FrontendContext,
+                options: *const root::JS::ReadOnlyCompileOptions,
+                srcBuf: *mut root::JS::SourceText<u16>,
+            ) -> root::already_AddRefed<root::JS::Stencil>;
+        }
+        extern "C" {
+            #[link_name = "\u{1}_ZN2JS21PrepareForInstantiateEPN2js15FrontendContextERNS0_8frontend32InitialStencilAndDelazificationsERNS_20InstantiationStorageE"]
+            pub fn PrepareForInstantiate(
+                fc: *mut root::JS::FrontendContext,
+                stencil: *mut root::JS::Stencil,
+                storage: *mut root::JS::InstantiationStorage,
             ) -> bool;
         }
         extern "C" {

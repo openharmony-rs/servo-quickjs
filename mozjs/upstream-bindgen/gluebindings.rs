@@ -241,6 +241,13 @@ pub mod root {
         ::std::option::Option<unsafe extern "C" fn(obj: *mut root::JSObject) -> bool>;
     pub type GetSize =
         ::std::option::Option<unsafe extern "C" fn(obj: *mut root::JSObject) -> usize>;
+    pub type StringCallback = ::std::option::Option<
+        unsafe extern "C" fn(
+            ptr: *const ::std::os::raw::c_char,
+            len: usize,
+            target: *mut ::std::os::raw::c_void,
+        ),
+    >;
     extern "C" {
         pub static mut gWantToMeasure: root::WantToMeasure;
     }
@@ -918,6 +925,20 @@ pub mod root {
         ) -> *mut root::JS::ReadOnlyCompileOptions;
     }
     extern "C" {
+        pub fn OwningCompileOptions_for_fc(
+            fc: *mut root::JS::FrontendContext,
+            rhs: *const root::JS::ReadOnlyCompileOptions,
+        ) -> *mut root::JS::OwningCompileOptions;
+    }
+    extern "C" {
+        pub fn CompileGlobalScriptToStencil_C(
+            fc: *mut root::JS::FrontendContext,
+            options: *const root::JS::ReadOnlyCompileOptions,
+            srcBuf: *mut root::JS::SourceText<root::mozilla::Utf8Unit>,
+            out_stencil: *mut root::already_AddRefed<root::JS::Stencil>,
+        );
+    }
+    extern "C" {
         pub fn NewProxyObject(
             aCx: *mut root::JSContext,
             aHandler: *const ::std::os::raw::c_void,
@@ -1430,19 +1451,12 @@ pub mod root {
     extern "C" {
         pub fn DescribeScriptedCaller(
             cx: *mut root::JSContext,
-            buffer: *mut ::std::os::raw::c_char,
-            buflen: usize,
+            callback: root::StringCallback,
+            message_target: *mut ::std::os::raw::c_void,
             line: *mut u32,
             col: *mut u32,
         ) -> bool;
     }
-    pub type StringCallback = ::std::option::Option<
-        unsafe extern "C" fn(
-            ptr: *const ::std::os::raw::c_char,
-            len: usize,
-            target: *mut ::std::os::raw::c_void,
-        ),
-    >;
     extern "C" {
         pub fn PendingExceptionStackInfo(
             cx: *mut root::JSContext,
