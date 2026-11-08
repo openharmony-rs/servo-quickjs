@@ -228,6 +228,7 @@ As SpiderMonkey does for web compatibility, formatted dates and times have U+002
 | Q43 | `JS_AddAssociatedMemory`/`JS_RemoveAssociatedMemory`: memory the embedder allocated for objects, with a GC trigger of its own like SpiderMonkey's malloc threshold | small |
 | Q44 | An `is_array` exotic method: ECMAScript's IsArray asks it about objects of classes that have one, after resolving JS Proxies, so that the embedder's proxies can be arrays as SpiderMonkey's forwarding proxies are (Servo's ObservableArray, `document.adoptedStyleSheets`) | small |
 | Q50 | `JS_ReadScript`: reads a global script that `JS_WriteObject` wrote as bytecode, whose functions get a new [[ScriptOrModule]] record with the muted-errors flag `JS_Eval` would give them, so that a script compiled by another runtime (off-thread compilation) runs as one compiled here does. `JS_ReadObject` gives read functions no record | small |
+| Q51 | Template objects that bytecode reads (`JS_ReadObject`) are frozen, as the parser makes them: reading made them only non-extensible, so a page could change the `length` of a tagged template's strings array in a script compiled off the main thread | small |
 
 ## Not supported
 

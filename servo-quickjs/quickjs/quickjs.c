@@ -40001,7 +40001,9 @@ static JSValue JS_ReadArray(BCReaderState *s, int tag)
             if (ret < 0)
                 goto fail;
         }
-        JS_PreventExtensions(ctx, obj);
+        /* Servo: frozen as the parser makes it, not only non-extensible */
+        if (seal_template_obj(ctx, obj))
+            goto fail;
     }
     return obj;
  fail:
