@@ -161,26 +161,24 @@ unsafe fn frame_name(cx: &Cx, frame: &Frame) -> Option<String> {
 
 pub(crate) unsafe fn DescribeScriptedCaller(
     cx: *mut root::JSContext,
-    buffer: *mut ::std::os::raw::c_char,
-    buflen: usize,
+    callback: crate::glue::StringCallback,
+    message_target: *mut ::std::os::raw::c_void,
     line: *mut u32,
     col: *mut u32,
 ) -> bool {
     let cx = Cx::from_raw(cx);
-    if buflen > 0 {
-        *buffer = 0;
-    }
     *line = 0;
     *col = 0;
     let Some(caller) = scripted_caller(cx) else {
         return false;
     };
     let filename = atom_to_string(cx, caller.filename);
-    if buflen > 0 {
-        let n = filename.len().min(buflen - 1);
-        ptr::copy_nonoverlapping(filename.as_ptr() as *const c_char, buffer, n);
-        *buffer.add(n) = 0;
-    }
+    let callback = callback.expect("DescribeScriptedCaller without a callback");
+    callback(
+        filename.as_ptr() as *const c_char,
+        filename.len(),
+        message_target,
+    );
     *line = caller.line;
     // mozjs's glue returns a zero-based column.
     *col = caller.column.saturating_sub(1);

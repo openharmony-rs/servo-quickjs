@@ -1,4 +1,4 @@
-Tests of mozjs 0.26.9 (servo/mozjs f47a0b40fb, `mozjs/tests/`), unmodified; the same as 0.26.7's. `../tests/` holds the
+Tests of mozjs 0.26.14 (servo/mozjs 138c947015, `mozjs/tests/`), unmodified; 0.26.7's and `offthread.rs`. `../tests/` holds the
 copies that run against the shim, with these changes:
 
 - `jsvalue.rs`: imports `JSVal` from `mozjs` (the shim has no `mozjs_sys` crate).

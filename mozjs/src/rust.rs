@@ -30,6 +30,7 @@ use crate::consts::{JSCLASS_IS_DOMJSCLASS, JSCLASS_IS_GLOBAL};
 use crate::default_heapsize;
 pub use crate::gc::*;
 use crate::glue::AppendToRootedObjectVector;
+use crate::glue::OwningCompileOptions_for_fc;
 use crate::glue::{DeleteCompileOptions, DeleteRootedObjectVector, DestroyRootedIdVector};
 use crate::glue::{DeleteJSAutoStructuredCloneBuffer, NewJSAutoStructuredCloneBuffer};
 use crate::glue::{GetIdVectorAddress, GetObjectVectorAddress, SliceRootedIdVector};
@@ -39,11 +40,13 @@ use crate::jsapi::js;
 use crate::jsapi::js::frontend::InitialStencilAndDelazifications;
 use crate::jsapi::mozilla::Utf8Unit;
 use crate::jsapi::HandleObjectVector as RawHandleObjectVector;
+use crate::jsapi::InstantiateOptions;
 use crate::jsapi::JS_AddExtraGCRootsTracer;
 use crate::jsapi::MutableHandleIdVector as RawMutableHandleIdVector;
 use crate::jsapi::StackFormat;
 use crate::jsapi::{already_AddRefed, jsid};
 use crate::jsapi::{BorrowedErrorReport, Rooted};
+use crate::jsapi::{DeleteOwningCompileOptions, OwningCompileOptions};
 use crate::jsapi::{HandleValueArray, StencilRelease};
 use crate::jsapi::{InitSelfHostedCode, IsWindowSlow};
 use crate::jsapi::{JSAutoStructuredCloneBuffer, JSStructuredCloneCallbacks, StructuredCloneScope};
@@ -61,6 +64,7 @@ use crate::jsapi::{PersistentRootedObjectVector, ReadOnlyCompileOptions};
 use crate::jsapi::{RootedObject, RootedValue, ToWindowProxyIfWindowSlow};
 use crate::jsapi::{SetWarningReporter, SourceText, ToBooleanSlow};
 use crate::jsval::{JSVal, ObjectValue, UndefinedValue};
+use crate::offthread::FrontendContext;
 use crate::panic::maybe_resume_unwind;
 use crate::realm::AutoRealm;
 use crate::sys::jsapi::JS::SavedFrameResult;
@@ -523,6 +527,43 @@ impl Drop for RootedObjectVectorWrapper {
     }
 }
 
+pub struct OwningCompileOptionsWrapper {
+    pub ptr: *mut OwningCompileOptions,
+}
+
+impl OwningCompileOptionsWrapper {
+    pub fn new_for_fc(fc: &FrontendContext, options: *const ReadOnlyCompileOptions) -> Self {
+        Self {
+            ptr: unsafe { OwningCompileOptions_for_fc(**fc, options) },
+        }
+    }
+
+    pub fn read_only(&self) -> &ReadOnlyCompileOptions {
+        unsafe { &(*self.ptr)._base }
+    }
+}
+
+unsafe impl Send for OwningCompileOptionsWrapper {}
+
+impl Drop for OwningCompileOptionsWrapper {
+    fn drop(&mut self) {
+        unsafe { DeleteOwningCompileOptions(self.ptr) }
+    }
+}
+
+impl From<&OwningCompileOptionsWrapper> for InstantiateOptions {
+    fn from(value: &OwningCompileOptionsWrapper) -> Self {
+        let options = value.read_only();
+        InstantiateOptions {
+            skipFilenameValidation: options._base.skipFilenameValidation_,
+            hideScriptFromDebugger: options._base.hideScriptFromDebugger_,
+            deferDebugMetadata: options._base.deferDebugMetadata_,
+            eagerDelazificationStrategy_: options._base.eagerDelazificationStrategy_,
+            eagerBaselineStrategy_: options._base.eagerBaselineStrategy_,
+        }
+    }
+}
+
 pub struct CompileOptionsWrapper {
     pub ptr: *mut ReadOnlyCompileOptions,
     filename: CString,
@@ -602,8 +643,7 @@ pub struct Stencil {
     inner: already_AddRefed<InitialStencilAndDelazifications>,
 }
 
-/*unsafe impl Send for Stencil {}
-unsafe impl Sync for Stencil {}*/
+unsafe impl Send for Stencil {}
 
 impl Drop for Stencil {
     fn drop(&mut self) {
@@ -627,6 +667,10 @@ impl Deref for Stencil {
 impl Stencil {
     pub fn is_null(&self) -> bool {
         self.inner.mRawPtr.is_null()
+    }
+
+    pub unsafe fn from_raw(inner: already_AddRefed<InitialStencilAndDelazifications>) -> Self {
+        Self { inner }
     }
 }
 
@@ -1026,17 +1070,22 @@ pub struct ScriptedCaller {
 }
 
 pub fn describe_scripted_caller(cx: &crate::context::JSContext) -> Result<ScriptedCaller, ()> {
-    let mut buf = [0; 1024];
+    let mut filename = String::new();
     let mut line = 0;
     let mut col = 0;
     if unsafe {
-        !wrappers2::DescribeScriptedCaller(cx, buf.as_mut_ptr(), buf.len(), &mut line, &mut col)
+        !wrappers2::DescribeScriptedCaller(
+            cx,
+            Some(fill_string_callback),
+            &raw mut filename as *mut c_void,
+            &mut line,
+            &mut col,
+        )
     } {
         return Err(());
     }
-    let filename = unsafe { CStr::from_ptr(buf.as_ptr()) };
     Ok(ScriptedCaller {
-        filename: String::from_utf8_lossy(filename.to_bytes()).into_owned(),
+        filename,
         line,
         col,
     })
@@ -1049,12 +1098,20 @@ pub struct ErrorInfo {
     pub col: u32,
 }
 
+/// Append a C string of `len` bytes into a Rust String pointed to by target
+///
+/// The C string is expected to be `utf-8` encoded. If it is not, the conversion will be lossy.
+///
+/// ## Safety
+///
+/// - `target` must be a valid `*mut String`, with no other active borrows.
+/// - `ptr` must point to a C char* array of `len` bytes.
 unsafe extern "C" fn fill_string_callback(ptr: *const c_char, len: usize, target: *mut c_void) {
     assert!(!ptr.is_null());
     let target = &mut *(target as *mut String);
 
-    let slice = slice::from_raw_parts(ptr as *const u8, len);
-    target.push_str(str::from_utf8_unchecked(slice));
+    let slice = String::from_utf8_lossy(slice::from_raw_parts(ptr as *const u8, len));
+    target.push_str(&slice);
 }
 
 /// Retrieve error info from the pending exception stack, by clearing it.
@@ -1480,6 +1537,7 @@ pub mod wrappers2 {
     use crate::jsapi::ExceptionStackBehavior;
     use crate::jsapi::ForOfIterator;
     use crate::jsapi::ForOfIterator_NonIterableBehavior;
+    use crate::jsapi::FrontendContext;
     use crate::jsapi::HandleObjectVector;
     use crate::jsapi::InstantiateOptions;
     use crate::jsapi::JSClass;
