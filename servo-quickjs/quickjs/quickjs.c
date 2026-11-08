@@ -39240,6 +39240,7 @@ typedef struct BCReaderState {
     JSObject **objects;
     int objects_count;
     int objects_size;
+    JSScriptOrModule *script_or_module; /* Servo: given to each function read, or NULL */
 
 #ifdef DUMP_READ_OBJECT
     const uint8_t *ptr_last;
@@ -39805,6 +39806,8 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
         bc_read_trace(s, "}\n");
     }
     b->realm = JS_DupContext(ctx);
+    /* Servo: the [[ScriptOrModule]] record of JS_ReadScript() */
+    b->script_or_module = js_dup_script_or_module(s->script_or_module);
     return obj;
  fail:
     JS_FreeValue(ctx, obj);
@@ -40342,8 +40345,9 @@ static void bc_reader_free(BCReaderState *s)
     js_free(s->ctx, s->objects);
 }
 
-JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
-                       int flags)
+/* Servo: JS_ReadObject(), giving the functions it reads 'script_or_module' (or NULL) */
+static JSValue JS_ReadObject2(JSContext *ctx, const uint8_t *buf, size_t buf_len,
+                              int flags, JSScriptOrModule *script_or_module)
 {
     BCReaderState ss, *s = &ss;
     JSValue obj;
@@ -40360,6 +40364,7 @@ JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
     s->is_rom_data = ((flags & JS_READ_OBJ_ROM_DATA) != 0);
     s->allow_sab = ((flags & JS_READ_OBJ_SAB) != 0);
     s->allow_reference = ((flags & JS_READ_OBJ_REFERENCE) != 0);
+    s->script_or_module = script_or_module;
     if (s->allow_bytecode)
         s->first_atom = JS_ATOM_END;
     else
@@ -40370,6 +40375,33 @@ JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
         obj = JS_ReadObjectRec(s);
     }
     bc_reader_free(s);
+    return obj;
+}
+
+JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
+                       int flags)
+{
+    return JS_ReadObject2(ctx, buf, buf_len, flags, NULL);
+}
+
+/* Servo: reads a global script written by JS_WriteObject(JS_WRITE_OBJ_BYTECODE), whose functions
+   get a new [[ScriptOrModule]] record, as a script that JS_Eval() compiles with 'eval_flags'
+   (JS_EVAL_FLAG_MUTED_ERRORS) */
+JSValue JS_ReadScript(JSContext *ctx, const uint8_t *buf, size_t buf_len, int eval_flags)
+{
+    JSScriptOrModule *sm;
+    JSValue obj;
+
+    sm = js_new_script_or_module(ctx, NULL);
+    if (!sm)
+        return JS_EXCEPTION;
+    sm->muted_errors = (eval_flags & JS_EVAL_FLAG_MUTED_ERRORS) != 0;
+    obj = JS_ReadObject2(ctx, buf, buf_len, JS_READ_OBJ_BYTECODE, sm);
+    js_free_script_or_module(ctx->rt, sm);
+    if (!JS_IsException(obj) && JS_VALUE_GET_TAG(obj) != JS_TAG_FUNCTION_BYTECODE) {
+        JS_FreeValue(ctx, obj);
+        return JS_ThrowTypeError(ctx, "not a script");
+    }
     return obj;
 }
 

@@ -2129,6 +2129,14 @@ unsafe extern "C" {
     ) -> JSValue;
 }
 unsafe extern "C" {
+    pub fn JS_ReadScript(
+        ctx: *mut JSContext,
+        buf: *const u8,
+        buf_len: usize,
+        eval_flags: ::std::os::raw::c_int,
+    ) -> JSValue;
+}
+unsafe extern "C" {
     pub fn JS_EvalFunction(ctx: *mut JSContext, fun_obj: JSValue) -> JSValue;
 }
 unsafe extern "C" {

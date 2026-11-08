@@ -1305,6 +1305,8 @@ uint8_t *JS_WriteObject2(JSContext *ctx, size_t *psize, JSValueConst obj,
 #define JS_READ_OBJ_REFERENCE (1 << 3) /* allow object references */
 JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
                       int flags);
+/* Servo: a global script's bytecode, with a new [[ScriptOrModule]] record */
+JSValue JS_ReadScript(JSContext *ctx, const uint8_t *buf, size_t buf_len, int eval_flags);
 /* instantiate and evaluate a bytecode function. Only used when
    reading a script or module with JS_ReadObject() */
 JSValue JS_EvalFunction(JSContext *ctx, JSValue fun_obj);

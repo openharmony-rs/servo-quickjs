@@ -227,6 +227,7 @@ As SpiderMonkey does for web compatibility, formatted dates and times have U+002
 | Q42 | `JS_SetFinalizationRegistryJobHook`: the embedder takes FinalizationRegistry cleanup jobs instead of the runtime's job list | small |
 | Q43 | `JS_AddAssociatedMemory`/`JS_RemoveAssociatedMemory`: memory the embedder allocated for objects, with a GC trigger of its own like SpiderMonkey's malloc threshold | small |
 | Q44 | An `is_array` exotic method: ECMAScript's IsArray asks it about objects of classes that have one, after resolving JS Proxies, so that the embedder's proxies can be arrays as SpiderMonkey's forwarding proxies are (Servo's ObservableArray, `document.adoptedStyleSheets`) | small |
+| Q50 | `JS_ReadScript`: reads a global script that `JS_WriteObject` wrote as bytecode, whose functions get a new [[ScriptOrModule]] record with the muted-errors flag `JS_Eval` would give them, so that a script compiled by another runtime (off-thread compilation) runs as one compiled here does. `JS_ReadObject` gives read functions no record | small |
 
 ## Not supported
 
