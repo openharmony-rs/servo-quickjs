@@ -351,6 +351,9 @@ static inline JSValue __JS_NewShortBigInt(JSContext *ctx, int64_t d)
 /* Servo: the script's errors are muted (HTML "muted errors"); eval and Function
    code inherit it */
 #define JS_EVAL_FLAG_MUTED_ERRORS (1 << 9)
+/* Servo: the first named function expression of the code binds no name in its own
+   scope, like the standalone functions of SpiderMonkey's JS::CompileFunction (patch Q52) */
+#define JS_EVAL_FLAG_STANDALONE_FUNCTION (1 << 10)
 
 typedef JSValue JSCFunction(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 typedef JSValue JSCFunctionMagic(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic);

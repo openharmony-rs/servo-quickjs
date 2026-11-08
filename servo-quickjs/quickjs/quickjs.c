@@ -22739,6 +22739,9 @@ typedef struct JSParseState {
     BOOL is_module; /* parsing a module */
     BOOL allow_html_comments;
     BOOL ext_json; /* JSON parsing: true if accepting JSON superset */
+    /* Servo (patch Q52): the next named function expression is standalone
+       (JS_EVAL_FLAG_STANDALONE_FUNCTION) */
+    BOOL standalone_function;
     GetLineColCache get_line_col_cache;
 } JSParseState;
 
@@ -37423,6 +37426,12 @@ static __exception int js_parse_function_decl2(JSParseState *s,
         *pfd = fd;
     s->cur_func = fd;
     fd->func_name = func_name;
+    /* Servo (patch Q52): like a function of SpiderMonkey's JS::CompileFunction, a standalone
+       function does not bind its name in its own scope */
+    if (s->standalone_function && func_type == JS_PARSE_FUNC_EXPR && func_name != JS_ATOM_NULL) {
+        fd->is_func_expr = FALSE;
+        s->standalone_function = FALSE;
+    }
     /* XXX: test !fd->is_generator is always false */
     fd->has_prototype = (func_type == JS_PARSE_FUNC_STATEMENT ||
                          func_type == JS_PARSE_FUNC_VAR ||
@@ -37999,6 +38008,7 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
 
     js_parse_init(ctx, s, input, input_len, filename);
     skip_shebang(&s->buf_ptr, s->buf_end);
+    s->standalone_function = (flags & JS_EVAL_FLAG_STANDALONE_FUNCTION) != 0; /* Servo (patch Q52) */
 
     eval_type = flags & JS_EVAL_TYPE_MASK;
     m = NULL;

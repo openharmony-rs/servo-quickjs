@@ -225,7 +225,8 @@ pub(crate) unsafe fn DeleteEnvironmentChain(chain: *mut root::JS::EnvironmentCha
 
 /// Compiles `body` as a function `name(args)` whose free variables resolve through the chain's
 /// objects (innermost last), like SpiderMonkey's non-syntactic environments: the function is
-/// created inside nested `with` statements over the chain objects.
+/// created inside nested `with` statements over the chain objects. As in SpiderMonkey, `name` is
+/// not bound in the function's scope (patch Q52).
 unsafe fn compile_function(
     cx: &Cx,
     chain: *const root::JS::EnvironmentChain,
@@ -271,7 +272,11 @@ unsafe fn compile_function(
         body
     );
     let buf = padded(options.base.lineno.saturating_sub(1).max(1), &src);
-    let outer = eval(cx, options, &buf, q::JS_EVAL_TYPE_GLOBAL as i32);
+    let mut flags = q::JS_EVAL_TYPE_GLOBAL as i32;
+    if is_identifier(&name) {
+        flags |= q::JS_EVAL_FLAG_STANDALONE_FUNCTION as i32;
+    }
+    let outer = eval(cx, options, &buf, flags);
     if outer.tag() == q::JS_TAG_EXCEPTION {
         return ptr::null_mut();
     }
@@ -288,6 +293,16 @@ unsafe fn compile_function(
         return ptr::null_mut();
     }
     cx.adopt(f).to_object() as *mut root::JSFunction
+}
+
+/// Whether `name` is an ASCII identifier, which the source of `compile_function` names its
+/// function with. Only then is the function the first named function expression of the source.
+fn is_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
 }
 
 pub(crate) unsafe fn CompileFunction(
