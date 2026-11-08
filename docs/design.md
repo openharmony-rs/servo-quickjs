@@ -154,6 +154,15 @@ The cost is memory: values stay alive until the end of the task. A build with `Q
 - **Synthetic modules** (JSON, and CSS and text modules via `CreateDefaultExportSyntheticModule`) are C modules whose only export is `default`; they have nothing to load.
 - **Not implemented** (Servo does not call them): `GetModuleObject`, `GetModuleForNamespace`, `GetModuleEnvironment`, source-phase imports, and `FinishLoadingImportedModule` with an import() promise as payload (SpiderMonkey's ContinueDynamicImport; Servo calls `FinishLoadingDynamicImportedModule` and continues itself). The load hook gets no source positions (line 0, column 1).
 
+## Off-thread compilation
+
+- `mozjs::offthread`, which Servo uses for classic scripts with its `dom_script_asynch` preference, compiles on a thread of its own with a frontend context. The frontend context compiles with a QuickJS runtime of its own, made and freed by each compilation, to the bytecode of a global script (`JS_WriteObject`): the stencil. A stencil is bytes with an atomic count, so any thread can hold or free it.
+- `InstantiateGlobalStencil` reads the bytecode in the current realm (patches Q50 and Q51). The script gets a [[ScriptOrModule]] record of its own, with muted errors from the compile options, like a script compiled in that realm.
+- When compiling fails, the frontend context keeps the source. `ConvertFrontendErrorsToRuntimeErrors` compiles it again in the caller's runtime, which throws the same error at the same position, or throws the first error again, with its type and message, if compiling succeeds there, as when the compiling thread's stack was too small.
+- `PrepareForInstantiate` and the instantiation storage do nothing.
+- `SetNativeStackQuota` limits the stack of a compilation from where it starts, which is near the top of the stack on `mozjs::offthread`'s threads; `ThreadStackQuotaForSize` gives nine tenths of the thread's stack.
+- **Not implemented** (Servo does not call them): compiling to a stencil with a context (`CompileGlobalScriptToStencil` taking a `JSContext`) or of a module, the other `CompileGlobalScriptToStencil` overloads, transcoding stencils (`DecodeStencil`), and reading a frontend context's errors and warnings (`GetFrontendErrorReport`, `HadFrontendOverRecursed`, `HadFrontendOutOfMemory`, `ClearFrontendErrors` and the warning accessors).
+
 ## Strings
 
 - `JS_GetLatin1StringCharsAndLength`, `JS_GetTwoByteStringCharsAndLength` and `JS_DeprecatedStringHasLatin1Chars` read QuickJS's 8- or 16-bit buffers directly (patch Q3 exports an accessor).
@@ -232,6 +241,6 @@ As SpiderMonkey does for web compatibility, formatted dates and times have U+002
 
 ## Not supported
 
-`Debugger` / devtools, WebAssembly, SharedArrayBuffer (already disabled in Servo), off-thread compilation, JIT options, and GC zeal.
+`Debugger` / devtools, WebAssembly, SharedArrayBuffer (already disabled in Servo), JIT options, and GC zeal.
 Explicit resource management: QuickJS has no `Symbol.dispose` and `Symbol.asyncDispose`, so `GetWellKnownSymbol` returns null for them.
 `JS_SetGCParameter` is a no-op. `AddAssociatedMemory`/`RemoveAssociatedMemory` have a GC trigger of their own (patch Q43), like SpiderMonkey's malloc threshold with its default parameters: a collection runs when the reported memory exceeds what the last one left, or 38 MiB, times 1.5, or up to 3 when collections come less than a second apart (SpiderMonkey's high-frequency heap growth). Servo reports the size of every DOM object and canvas bitmap, which a collection frees with their reflectors.

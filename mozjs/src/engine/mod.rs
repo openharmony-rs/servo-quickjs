@@ -42,6 +42,7 @@ mod proxy;
 mod realm;
 mod reentrant;
 mod runtime;
+mod stencil;
 mod string;
 pub(crate) mod verify;
 
@@ -60,6 +61,7 @@ pub(crate) use property::*;
 pub(crate) use proxy::*;
 pub(crate) use realm::*;
 pub(crate) use runtime::*;
+pub(crate) use stencil::*;
 pub(crate) use string::*;
 
 /// What a SpiderMonkey `JSContext*` points to: one per QuickJS runtime (one per thread).
