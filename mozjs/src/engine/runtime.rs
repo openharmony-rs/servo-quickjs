@@ -41,6 +41,7 @@ pub(crate) unsafe fn JS_NewContext(
         warning_reporter: Cell::new(None),
         hooks: Default::default(),
         base_key_object: Cell::new(base_key_object),
+        rooters: Default::default(),
     }));
     q::JS_SetRuntimeOpaque(rt, cx as *mut _);
     set_current(cx);
@@ -55,6 +56,7 @@ pub(crate) unsafe fn JS_DestroyContext(raw: *mut root::JSContext) {
         cx.leave_realm();
     }
     super::free_microtasks(cx);
+    cx.rooters.borrow_mut().clear();
     cx.drain_pool((0, 0));
     q::JS_FreeValueRT(cx.rt, cx.base_key_object.replace(q::JS_UNDEFINED));
     q::JS_FreeContext(cx.base_ctx);
@@ -124,6 +126,7 @@ pub(crate) unsafe fn JS_GC(cx: *mut root::JSContext, reason: root::JS::GCReason)
     let _ = reason;
     let cx = Cx::from_raw(cx);
     let rt = cx.rt;
+    super::rooter::trace_custom_rooters(cx);
     let roots = gc_stats_mode().is_some_and(|mode| mode == "roots" || mode.starts_with("paths:"));
     if roots {
         q::JS_SetGCRootsHook(rt, Some(record_root), ptr::null_mut());

@@ -12,7 +12,7 @@
 // A `&mut` handed out from a shared reference (`&Cx`) aliases: see HACKING.md, "Re-entrancy".
 #![deny(clippy::mut_from_ref)]
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ffi::CString;
 use std::ptr;
 
@@ -41,10 +41,13 @@ mod property;
 mod proxy;
 mod realm;
 mod reentrant;
+mod rooter;
 mod runtime;
 mod stencil;
 mod string;
 pub(crate) mod verify;
+
+pub(crate) type RooterTrace = unsafe extern "C" fn(*mut std::ffi::c_void, *mut root::JSTracer);
 
 pub(crate) use atom::*;
 pub(crate) use buffer::*;
@@ -60,6 +63,7 @@ pub(crate) use promise::*;
 pub(crate) use property::*;
 pub(crate) use proxy::*;
 pub(crate) use realm::*;
+pub(crate) use rooter::*;
 pub(crate) use runtime::*;
 pub(crate) use stencil::*;
 pub(crate) use string::*;
@@ -83,6 +87,8 @@ pub(crate) struct Cx {
     pub hooks: promise::RuntimeHooks,
     /// The key object of `base_ctx` (counted), for intrinsics outside any realm.
     pub base_key_object: Cell<q::JSValue>,
+    /// `CustomAutoRooter`s registered for the duration of their guards.
+    pub rooters: RefCell<Vec<(usize, RooterTrace)>>,
 }
 
 /// What a SpiderMonkey `JS::Realm*` (and `JS::Compartment*`) points to. Owned by its QuickJS
@@ -121,6 +127,24 @@ impl Cx {
 
     pub fn current_realm(&self) -> *mut RealmData {
         self.realm_stack.last().unwrap_or(ptr::null_mut())
+    }
+
+    pub(crate) fn add_rooter(&self, rooter: usize, trace: RooterTrace) {
+        self.rooters.borrow_mut().push((rooter, trace));
+    }
+
+    pub(crate) fn remove_rooter(&self, rooter: usize) {
+        let mut rooters = self.rooters.borrow_mut();
+        if let Some(index) = rooters
+            .iter()
+            .rposition(|(registered, _)| *registered == rooter)
+        {
+            rooters.remove(index);
+        }
+    }
+
+    pub(crate) fn rooters(&self) -> Vec<(usize, RooterTrace)> {
+        self.rooters.borrow().clone()
     }
 
     /// Makes `realm` current, and keeps it alive, until the matching `leave_realm`.

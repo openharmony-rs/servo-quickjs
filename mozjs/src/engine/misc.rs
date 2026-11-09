@@ -94,7 +94,7 @@ pub(crate) unsafe fn NonIncrementalGC(
     reason: root::JS::GCReason,
 ) {
     let _ = (options, reason);
-    q::JS_RunGC(Cx::from_raw(cx).rt);
+    super::rooter::run_gc(cx);
 }
 
 pub(crate) unsafe fn JS_MaybeGC(cx: *mut root::JSContext) {
@@ -116,7 +116,7 @@ pub(crate) unsafe fn StartIncrementalGC(
     budget: *const root::JS::SliceBudget,
 ) {
     let _ = (options, reason, budget);
-    q::JS_RunGC(Cx::from_raw(cx).rt);
+    super::rooter::run_gc(cx);
 }
 
 pub(crate) unsafe fn IncrementalGCSlice(
@@ -278,7 +278,7 @@ pub(crate) unsafe fn JS_SetDestroyZoneCallback(
 
 pub(crate) unsafe fn SetLowMemoryState(cx: *mut root::JSContext, newState: bool) {
     if newState {
-        q::JS_RunGC(Cx::from_raw(cx).rt);
+        super::rooter::run_gc(cx);
     }
 }
 

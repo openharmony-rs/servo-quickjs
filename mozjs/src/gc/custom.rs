@@ -59,13 +59,24 @@ pub struct CustomAutoRooter<T> {
     data: T,
 }
 
-impl<T> CustomAutoRooter<T> {
+impl<T: CustomTrace> CustomAutoRooter<T> {
     unsafe fn add_to_root_stack(&mut self, cx: *mut JSContext) {
         self._base._base.add_to_root_stack(cx);
+        // QuickJS keeps rooted values alive through the autorelease pool, but SpiderMonkey
+        // still runs the virtual trace callback during a collection. Servo's custom trace
+        // implementations observe that contract, so keep these rooters in the runtime's list.
+        crate::engine::register_custom_rooter(
+            cx,
+            self as *mut Self as *mut c_void,
+            <Self as CustomAutoTraceable>::trace,
+        );
     }
 
     unsafe fn remove_from_root_stack(&mut self) {
         self._base._base.remove_from_root_stack();
+        if let Some(cx) = crate::engine::try_current() {
+            crate::engine::unregister_custom_rooter(cx.as_raw(), self as *mut Self as *mut c_void);
+        }
     }
 }
 

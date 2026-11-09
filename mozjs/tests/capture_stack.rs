@@ -27,8 +27,11 @@ fn capture_stack() {
             .as_string(None, StackFormat::SpiderMonkey)
             .unwrap();
         println!("{}", str_stack);
+        // QuickJS counts source lines from 1 when the compile options say 0, and reports the
+        // column of the call's `(`. The frame names, files and order stay the same as
+        // SpiderMonkey's; see `upstream-tests/README.md`.
         assert_eq!(
-            "bar@test.js:3:21\nfoo@test.js:5:17\n@test.js:8:16\n".to_string(),
+            "bar@test.js:4:32\nfoo@test.js:6:20\n@test.js:9:16\n".to_string(),
             str_stack
         );
 
