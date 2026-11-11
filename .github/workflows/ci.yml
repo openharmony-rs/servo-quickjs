@@ -39,6 +39,8 @@ jobs:
         run: just lint
       - name: Tests
         run: just test
+      - name: Tests without the debugger
+        run: just test-no-debugger
       - name: Tests with the tracing verifier
         run: just test-verify
       - name: Tests with autorelease pool statistics

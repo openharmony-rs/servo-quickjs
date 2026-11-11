@@ -401,6 +401,7 @@ struct JSRuntime {
     uint32_t proto_epoch;
     /* Servo: called when a context is freed */
     JSContextFinalizer *context_finalizer;
+#ifdef CONFIG_DEBUGGER
     /* Servo: the breakpoints of the functions that have some, a hash table by
        function, and the handler called when one runs (Q45) */
     struct JSBreakpoints **breakpoint_hash;
@@ -428,6 +429,7 @@ struct JSRuntime {
     struct JSStatementPositions *statement_positions;
     int statement_positions_count;
     int statement_positions_size;
+#endif
 
     JSModuleNormalizeFunc *module_normalize_func;
     BOOL module_loader_has_attr;
@@ -494,7 +496,9 @@ typedef struct JSStackFrame {
     /* only used in generators. Current stack pointer value. NULL if
        the function is running. */
     JSValue *cur_sp;
+#ifdef CONFIG_DEBUGGER
     JSValue this_obj; /* Servo: borrowed, for debuggers (Q47) */
+#endif
 } JSStackFrame;
 
 typedef enum {
@@ -819,8 +823,10 @@ typedef struct JSFunctionBytecode {
         JSAtom filename;
         int source_len; 
         int pc2line_len;
+#ifdef CONFIG_DEBUGGER
         /* Servo: the last //# sourceURL of the source of a script's code (Q48) */
         JSAtom source_url;
+#endif
         uint8_t *pc2line_buf;
         char *source;
     } debug;
@@ -1294,7 +1300,11 @@ static JSValue JS_InvokeFree(JSContext *ctx, JSValue this_val, JSAtom atom,
 static __exception int JS_ToArrayLengthFree(JSContext *ctx, uint32_t *plen,
                                             JSValue val, BOOL is_array_ctor);
 /* Servo: internal eval flag, the code of the Function constructor (Q48) */
+#ifdef CONFIG_DEBUGGER
 #define JS_EVAL_FLAG_FUNCTION_SOURCE (1 << 16)
+#else
+#define JS_EVAL_FLAG_FUNCTION_SOURCE 0
+#endif
 /* Servo: 'compile_kind' is the JSCompileKindEnum of the host check, -1 for none */
 static JSValue JS_EvalObject(JSContext *ctx, JSValueConst this_obj,
                              JSValueConst val, int flags, int scope_idx,
@@ -2661,9 +2671,11 @@ void JS_FreeRuntime(JSRuntime *rt)
 #endif
     assert(list_empty(&rt->gc_obj_list));
     assert(list_empty(&rt->weakref_list));
+#ifdef CONFIG_DEBUGGER
     assert(rt->breakpoint_function_count == 0);
     js_free_rt(rt, rt->breakpoint_hash);
     js_free_rt(rt, rt->statement_positions);
+#endif
 
     /* free the classes */
     for(i = 0; i < rt->class_count; i++) {
@@ -18120,7 +18132,9 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     ctx = p->u.cfunc.realm; /* change the current realm */
     sf->js_mode = 0;
     sf->cur_func = (JSValue)func_obj;
+#ifdef CONFIG_DEBUGGER
     sf->this_obj = this_obj; /* Servo (Q47) */
+#endif
     sf->arg_count = argc;
     arg_buf = argv;
 
@@ -18272,6 +18286,7 @@ typedef enum {
 #define FUNC_RET_YIELD_STAR    2
 #define FUNC_RET_INITIAL_YIELD 3
 
+#ifdef CONFIG_DEBUGGER
 /* Servo: breakpoints (Q45). An instruction with a breakpoint starts with
    OP_breakpoint instead of its opcode, which the runtime keeps in the breakpoints
    of its function. */
@@ -18526,6 +18541,7 @@ static int js_native_call_hook(JSContext *ctx, JSObject *p)
     }
     return 0;
 }
+#endif
 
 #ifdef OPCODE_ASM_LABEL
 #pragma GCC diagnostic push
@@ -18549,8 +18565,12 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     size_t alloca_size;
 
 #if !DIRECT_DISPATCH
+#ifdef CONFIG_DEBUGGER
 #define SWITCH(pc)      opcode = *pc++; redispatch: switch (opcode)
 #define REDISPATCH(op)  do { opcode = (op); goto redispatch; } while (0)
+#else
+#define SWITCH(pc)      switch (opcode = *pc++)
+#endif
 #define CASE(op)        case op
 #define DEFAULT         default
 #define BREAK           break
@@ -18566,7 +18586,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         [ OP_COUNT ... 255 ] = &&case_default
     };
 #define SWITCH(pc)      goto *dispatch_table[opcode = *pc++];
+#ifdef CONFIG_DEBUGGER
 #define REDISPATCH(op)  goto *dispatch_table[opcode = (op)]
+#endif
 #ifdef OPCODE_ASM_LABEL
 #define CASE(op)        case_ ## op: asm volatile("label_" #op ":\n.globl label_" #op); dummy_case_ ## op
 #else
@@ -18596,9 +18618,11 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             pc = sf->cur_pc;
             sf->prev_frame = rt->current_stack_frame;
             rt->current_stack_frame = sf;
+#ifdef CONFIG_DEBUGGER
             /* Servo: debugger hook (Q46) */
             if (unlikely(rt->frame_enter_hook) && js_frame_enter_hook(ctx) < 0)
                 goto exception;
+#endif
             if (s->throw_flag)
                 goto exception;
             else
@@ -18615,9 +18639,11 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         not_a_function:
             return JS_ThrowTypeError(caller_ctx, "not a function");
         }
+#ifdef CONFIG_DEBUGGER
         /* Servo: debugger hook (Q46) */
         if (unlikely(rt->native_call_hook) && js_native_call_hook(caller_ctx, p) < 0)
             return JS_EXCEPTION;
+#endif
         return call_func(caller_ctx, func_obj, this_obj, argc,
                          (JSValueConst *)argv, flags);
     }
@@ -18639,7 +18665,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     arg_buf = argv;
     sf->arg_count = argc;
     sf->cur_func = (JSValue)func_obj;
+#ifdef CONFIG_DEBUGGER
     sf->this_obj = this_obj; /* Servo (Q47) */
+#endif
     var_refs = p->u.func.var_refs;
 
     local_buf = alloca(alloca_size);
@@ -18668,12 +18696,14 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     sf->prev_frame = rt->current_stack_frame;
     rt->current_stack_frame = sf;
     ctx = b->realm; /* set the current realm */
+#ifdef CONFIG_DEBUGGER
     /* Servo: debugger hook (Q46) */
     if (unlikely(rt->frame_enter_hook)) {
         sf->cur_pc = pc;
         if (js_frame_enter_hook(ctx) < 0)
             goto exception;
     }
+#endif
 
  restart:
     for(;;) {
@@ -21419,6 +21449,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 
         CASE(OP_nop):
             BREAK;
+#ifdef CONFIG_DEBUGGER
         CASE(OP_breakpoint): /* Servo (Q45) */
             {
                 uint32_t pos = pc - 1 - b->byte_code_buf;
@@ -21433,6 +21464,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 }
                 REDISPATCH(op);
             }
+#endif
         CASE(OP_is_undefined_or_null):
             if (JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_UNDEFINED ||
                 JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_NULL) {
@@ -21533,16 +21565,20 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     done_generator:
         sf->cur_pc = pc;
         sf->cur_sp = sp;
+#ifdef CONFIG_DEBUGGER
         /* Servo: debugger hook (Q46) */
         if (unlikely(rt->frame_exit_hook))
             ret_val = js_frame_exit_hook(ctx, b, ret_val, sp, stack_buf);
+#endif
     } else {
     done:
+#ifdef CONFIG_DEBUGGER
         /* Servo: debugger hook (Q46) */
         if (unlikely(rt->frame_exit_hook)) {
             sf->cur_pc = pc;
             ret_val = js_frame_exit_hook(ctx, b, ret_val, sp, stack_buf);
         }
+#endif
         if (unlikely(b->var_ref_count != 0)) {
             /* variable references reference the stack: must close them */
             close_var_refs(rt, b, sf);
@@ -21682,9 +21718,11 @@ static JSValue JS_CallConstructorInternal(JSContext *ctx,
         not_a_function:
             return JS_ThrowTypeError(ctx, "not a function");
         }
+#ifdef CONFIG_DEBUGGER
         /* Servo: debugger hook (Q46) */
         if (unlikely(ctx->rt->native_call_hook) && js_native_call_hook(ctx, p) < 0)
             return JS_EXCEPTION;
+#endif
         return call_func(ctx, func_obj, new_target, argc,
                          (JSValueConst *)argv, flags);
     }
@@ -21772,7 +21810,9 @@ static JSAsyncFunctionState *async_func_init(JSContext *ctx,
     sf->arg_buf = (JSValue *)(s + 1);
     sf->cur_func = JS_DupValue(ctx, func_obj);
     s->this_val = JS_DupValue(ctx, this_obj);
+#ifdef CONFIG_DEBUGGER
     sf->this_obj = s->this_val; /* Servo (Q47) */
+#endif
     s->argc = argc;
     sf->arg_count = arg_buf_len;
     sf->var_buf = sf->arg_buf + arg_buf_len;
@@ -22993,8 +23033,10 @@ typedef struct JSFunctionDef {
     DynBuf byte_code;
     int last_opcode_pos; /* -1 if no last opcode */
     const uint8_t *last_opcode_source_ptr;
+#ifdef CONFIG_DEBUGGER
     /* Servo: the byte code size after the last statement position, plus one, or 0 (Q49) */
     int statement_pos_end;
+#endif
     BOOL use_short_opcodes; /* true if short opcodes are used in byte_code */
 
     LabelSlot *label_slots;
@@ -23080,11 +23122,13 @@ typedef struct JSParseState {
        (JS_EVAL_FLAG_STANDALONE_FUNCTION) */
     BOOL standalone_function;
     GetLineColCache get_line_col_cache;
+#ifdef CONFIG_DEBUGGER
     /* Servo: the URL of the last sourceURL directive (Q48) */
     const uint8_t *source_url;
     int source_url_len;
     /* Servo: the line and column (1-based) of each statement position (Q49) */
     DynBuf statement_positions;
+#endif
 } JSParseState;
 
 typedef struct JSOpCode {
@@ -23776,6 +23820,7 @@ static JSAtom parse_ident(JSParseState *s, const uint8_t **pp,
 }
 
 
+#ifdef CONFIG_DEBUGGER
 /* Servo: a sourceURL directive at the start of a line comment or anywhere in a
    block comment ("//# sourceURL=url", '#' or '@'), as SpiderMonkey reads them: the
    URL ends at white space or the end of the comment, and the last non-empty one is
@@ -23812,6 +23857,7 @@ static void js_parse_source_url(JSParseState *s, const uint8_t *p, BOOL block)
         s->source_url_len = p - start;
     }
 }
+#endif
 
 static __exception int next_token(JSParseState *s)
 {
@@ -23874,8 +23920,10 @@ static __exception int next_token(JSParseState *s)
                     js_parse_error(s, "unexpected end of comment");
                     goto fail;
                 }
+#ifdef CONFIG_DEBUGGER
                 if (*p == '#' || *p == '@')
                     js_parse_source_url(s, p, TRUE); /* Servo (Q48) */
+#endif
                 if (p[0] == '*' && p[1] == '/') {
                     p += 2;
                     break;
@@ -23898,7 +23946,9 @@ static __exception int next_token(JSParseState *s)
         } else if (p[1] == '/') {
             /* line comment */
             p += 2;
+#ifdef CONFIG_DEBUGGER
             js_parse_source_url(s, p, FALSE); /* Servo (Q48) */
+#endif
         skip_line_comment:
             for(;;) {
                 if (*p == '\0' && p >= s->buf_end)
@@ -24839,6 +24889,7 @@ static void emit_u32(JSParseState *s, uint32_t val)
     dbuf_put_u32(&s->cur_func->byte_code, val);
 }
 
+#ifdef CONFIG_DEBUGGER
 /* Servo: whether only labels follow the last statement position, whose
    instruction is still to come (Q49) */
 static BOOL statement_pos_pending(JSFunctionDef *fd)
@@ -24854,15 +24905,18 @@ static BOOL statement_pos_pending(JSFunctionDef *fd)
     }
     return TRUE;
 }
+#endif
 
 static void emit_source_pos(JSParseState *s, const uint8_t *source_ptr)
 {
     JSFunctionDef *fd = s->cur_func;
     DynBuf *bc = &fd->byte_code;
 
+#ifdef CONFIG_DEBUGGER
     /* Servo: the first instruction of a statement keeps its position (Q49) */
     if (unlikely(fd->statement_pos_end) && statement_pos_pending(fd))
         return;
+#endif
     if (unlikely(fd->last_opcode_source_ptr != source_ptr)) {
         dbuf_putc(bc, OP_line_num);
         dbuf_put_u32(bc, source_ptr - s->buf_start);
@@ -24870,6 +24924,7 @@ static void emit_source_pos(JSParseState *s, const uint8_t *source_ptr)
     }
 }
 
+#ifdef CONFIG_DEBUGGER
 /* Servo: a statement position for debuggers (Q49): where a statement starts or a
    function or script ends. While the runtime records them, the instruction that
    follows gets the position, and the parser lists it. */
@@ -24889,6 +24944,11 @@ static void emit_statement_pos(JSParseState *s, const uint8_t *source_ptr)
     dbuf_put_u32(&s->statement_positions, line_num + 1);
     dbuf_put_u32(&s->statement_positions, col_num + 1);
 }
+#else
+static inline void emit_statement_pos(JSParseState *s, const uint8_t *source_ptr)
+{
+}
+#endif
 
 static void emit_op(JSParseState *s, uint8_t val)
 {
@@ -37504,7 +37564,9 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     b->super_call_allowed = fd->super_call_allowed;
     b->super_allowed = fd->super_allowed;
     b->arguments_allowed = fd->arguments_allowed;
+#ifdef CONFIG_DEBUGGER
     b->is_toplevel = fd->is_eval; /* Servo (Q47) */
+#endif
     b->is_direct_or_indirect_eval = (fd->eval_type == JS_EVAL_TYPE_DIRECT ||
                                      fd->eval_type == JS_EVAL_TYPE_INDIRECT);
     b->realm = JS_DupContext(ctx);
@@ -37531,6 +37593,7 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     return JS_EXCEPTION;
 }
 
+#ifdef CONFIG_DEBUGGER
 /* Servo: the statement positions of the code of a script (Q49) */
 typedef struct JSStatementPositions {
     JSFunctionBytecode *b;
@@ -37560,6 +37623,7 @@ static void js_free_statement_positions(JSRuntime *rt, JSFunctionBytecode *b)
     }
     b->has_statement_positions = FALSE;
 }
+#endif
 
 static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
 {
@@ -37572,6 +37636,7 @@ static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
                JS_AtomGetStrRT(rt, buf, sizeof(buf), b->func_name));
     }
 #endif
+#ifdef CONFIG_DEBUGGER
     /* Servo: free_bytecode_atoms() reads the original opcodes */
     if (b->has_breakpoints)
         js_free_breakpoints(rt, b);
@@ -37579,6 +37644,7 @@ static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
         rt->insn_walk_b = NULL;
     if (b->has_statement_positions)
         js_free_statement_positions(rt, b);
+#endif
     if (b->byte_code_buf)
         free_bytecode_atoms(rt, b->byte_code_buf, b->byte_code_len, TRUE);
 
@@ -37601,7 +37667,9 @@ static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
     JS_FreeAtomRT(rt, b->func_name);
     if (b->has_debug) {
         JS_FreeAtomRT(rt, b->debug.filename);
+#ifdef CONFIG_DEBUGGER
         JS_FreeAtomRT(rt, b->debug.source_url); /* Servo (Q48) */
+#endif
         js_free_rt(rt, b->debug.pc2line_buf);
         js_free_rt(rt, b->debug.source);
     }
@@ -38589,6 +38657,7 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
     fun_obj = js_create_function(ctx, fd);
     if (JS_IsException(fun_obj))
         goto fail1;
+#ifdef CONFIG_DEBUGGER
     /* Servo: the display URL of the code (Q48) */
     if (s->source_url) {
         JSFunctionBytecode *b1 = JS_VALUE_GET_PTR(fun_obj);
@@ -38634,6 +38703,7 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
         if (JS_HasException(ctx))
             JS_FreeValue(ctx, JS_GetException(ctx));
     }
+#endif
     /* Could add a flag to avoid resolution if necessary */
     if (m) {
         m->func_obj = fun_obj;
@@ -38642,7 +38712,9 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
             goto fail1;
         fun_obj = JS_NewModuleValue(ctx, m);
     }
+#ifdef CONFIG_DEBUGGER
     dbuf_free(&s->statement_positions); /* Servo (Q49) */
+#endif
     if (flags & JS_EVAL_FLAG_COMPILE_ONLY) {
         ret_val = fun_obj;
     } else {
@@ -38650,7 +38722,9 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
     }
     return ret_val;
  fail1:
+#ifdef CONFIG_DEBUGGER
     dbuf_free(&s->statement_positions); /* Servo (Q49) */
+#endif
     /* XXX: should free all the unresolved dependencies */
     if (m)
         JS_FreeValue(ctx, JS_MKPTR(JS_TAG_MODULE, m));
@@ -38914,7 +38988,11 @@ typedef enum BCTagEnum {
     BC_TAG_OBJECT_REFERENCE,
 } BCTagEnum;
 
+#ifdef CONFIG_DEBUGGER
 #define BC_VERSION 6 /* Servo: OP_breakpoint renumbered the opcodes after it (Q45) */
+#else
+#define BC_VERSION 5
+#endif
 
 typedef struct BCWriterState {
     JSContext *ctx;
@@ -39140,9 +39218,13 @@ static int JS_WriteFunctionBytecode(BCWriterState *s, JSFunctionBytecode *b)
 
     pos = 0;
     while (pos < bc_len) {
+#ifdef CONFIG_DEBUGGER
         /* Servo: without the breakpoints (Q45) */
         op = js_breakpoint_opcode(s->ctx->rt, b, pos);
         bc_buf[pos] = op;
+#else
+        op = bc_buf[pos];
+#endif
         len = short_opcode_info(op).size;
         switch(short_opcode_info(op).fmt) {
         case OP_FMT_atom:
@@ -64098,6 +64180,7 @@ JSContext *JS_GetScriptRealm(JSValueConst script)
     return ((JSFunctionBytecode *)JS_VALUE_GET_PTR(script))->realm;
 }
 
+#ifdef CONFIG_DEBUGGER
 /* Servo: breakpoints (Q45) */
 
 void JS_SetBreakpointHandler(JSRuntime *rt, JSBreakpointHandler *handler, void *opaque)
@@ -64700,6 +64783,7 @@ int JS_ClearBreakpoint(JSRuntime *rt, JSValueConst script, uint32_t pc)
         js_delete_breakpoints(rt, bps);
     return 0;
 }
+#endif
 
 /* Marks a settled promise as handled, telling the rejection tracker like
    adding a reaction would (without adding one). */

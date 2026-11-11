@@ -23,7 +23,9 @@
 //! loops, see the design doc.
 
 use std::cell::{Cell, RefCell};
-use std::ffi::{c_char, c_int, c_uint, c_void, CString};
+#[cfg(qjs_debugger)]
+use std::ffi::c_char;
+use std::ffi::{c_int, c_uint, c_void, CString};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::OnceLock;
@@ -236,6 +238,7 @@ pub(crate) unsafe fn proxy_class(obj: *mut root::JSObject) -> Option<*const root
 /// The class name of a proxy, as SpiderMonkey's `js::Proxy::className`: that of the handler's
 /// `className` trap, else the target's for forwarding and wrapper handlers, else the class's. `None`
 /// if `obj` is not a proxy of the shim.
+#[cfg(qjs_debugger)]
 pub(crate) unsafe fn proxy_class_name(cx: &Cx, obj: *mut root::JSObject) -> Option<*const c_char> {
     let data = proxy_data(obj)?;
     let handler = &*data.handler;

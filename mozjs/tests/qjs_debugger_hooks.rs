@@ -7,6 +7,8 @@
 //! (Q47), the code of eval() and Function() with sourceURL directives (Q48), and statement
 //! positions (Q49).
 
+#![cfg(feature = "debugger")]
+
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, c_void};
 use std::ptr::{self, NonNull};

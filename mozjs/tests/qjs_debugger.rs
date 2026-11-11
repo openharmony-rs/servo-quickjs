@@ -5,6 +5,8 @@
 //! The emulation of SpiderMonkey's `Debugger` API (`engine/debugger_api.js`), as Servo's
 //! devtools (`debugger.js`) use it: a debugger global with `Debugger`, and a debuggee global.
 
+#![cfg(feature = "debugger")]
+
 use std::ffi::CStr;
 use std::ptr::{self, NonNull};
 use std::sync::{Arc, OnceLock};

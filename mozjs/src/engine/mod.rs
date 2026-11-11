@@ -26,6 +26,10 @@ mod atom;
 mod buffer;
 mod class;
 mod clone;
+#[cfg(qjs_debugger)]
+mod debugger;
+#[cfg(not(qjs_debugger))]
+#[path = "no_debugger.rs"]
 mod debugger;
 mod error;
 mod eval;

@@ -19,6 +19,10 @@ ubsan := "-fno-sanitize-recover=undefined"
 test *args:
     CARGO_TARGET_DIR={{target}} cargo test -p mozjs {{args}} -- {{by_design}}
 
+# Run the tests without the debugger (Servo's builds without devtools), in a separate target dir.
+test-no-debugger *args:
+    CARGO_TARGET_DIR={{target}}/no-debugger cargo test -p mozjs --no-default-features --features jit,libz-sys,intl {{args}} -- {{by_design}}
+
 # Run the tests with the tracing verifier.
 test-verify *args:
     QJS_VERIFY_TRACING=1 CARGO_TARGET_DIR={{target}} cargo test -p mozjs {{args}} -- {{by_design}}
@@ -57,7 +61,7 @@ test262 *args: test262-fetch
     set -euo pipefail
     cd servo-quickjs/quickjs
     flags=(-O2 -g -fwrapv -fsanitize=address,undefined {{ubsan}} -fno-omit-frame-pointer -D_GNU_SOURCE
-           -DCONFIG_VERSION="\"$(cat VERSION)\"")
+           -DCONFIG_VERSION="\"$(cat VERSION)\"" -DCONFIG_DEBUGGER)
     objs=()
     for f in quickjs dtoa libregexp libunicode cutils quickjs-libc run-test262; do
         {{clang}} "${flags[@]}" -c $f.c -o {{test262_dir}}/$f.o
@@ -77,7 +81,7 @@ lint:
 
 # Build Servo's servoshell (in `SERVO_DIR`) against the shim.
 servo cmd="build":
-    cd {{servo}} && LIBCLANG_PATH={{libclang}} CARGO_TARGET_DIR={{servo_target}} cargo {{cmd}} -p servoshell --config '{{patch}}'
+    cd {{servo}} && SERVO_QUICKJS_DEBUGGER=1 LIBCLANG_PATH={{libclang}} CARGO_TARGET_DIR={{servo_target}} cargo {{cmd}} -p servoshell --config '{{patch}}'
 
 # Run the shim-backed servoshell headless on a page (`just servo "build --features js-quickjs"` first).
 run page *args:
