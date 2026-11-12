@@ -928,6 +928,10 @@ unsafe extern "C" fn can_compile_strings(
     opaque: *mut c_void,
 ) -> c_int {
     let cx = hook_cx(opaque);
+    // As in SpiderMonkey, the debugger's `frame.eval` is not checked.
+    if cx.debugger.take_frame_eval_check() {
+        return 1;
+    }
     let Some(allows) = (*cx.hooks.security_callbacks.get()).contentSecurityPolicyAllows else {
         return 1;
     };

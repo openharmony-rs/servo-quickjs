@@ -33,6 +33,16 @@ fn main() {
     if std::env::var_os("CARGO_FEATURE_DUMP_LEAKS").is_some() {
         build.define("DUMP_LEAKS", "1");
     }
+    // Servo can't name the feature, which SpiderMonkey's mozjs doesn't have, so its mach sets the
+    // variable for builds with devtools.
+    println!("cargo:rerun-if-env-changed=SERVO_QUICKJS_DEBUGGER");
+    if std::env::var_os("CARGO_FEATURE_DEBUGGER").is_some()
+        || std::env::var("SERVO_QUICKJS_DEBUGGER").as_deref() == Ok("1")
+    {
+        build.define("CONFIG_DEBUGGER", None);
+        // `DEP_QUICKJS_DEBUGGER` for mozjs's build script.
+        println!("cargo:debugger=1");
+    }
     build.compile("quickjs");
     println!("cargo:rerun-if-changed=quickjs");
     println!("cargo:rerun-if-changed=src/static_wrappers.c");

@@ -1216,6 +1216,170 @@ JSModuleDef *JS_GetScriptModule(JSValueConst script);
 /* Servo: the realm whose global a script's code runs in (the realm it was
    compiled in), or NULL if 'script' is not code. */
 JSContext *JS_GetScriptRealm(JSValueConst script);
+#ifdef CONFIG_DEBUGGER
+/* Servo (debugger): breakpoints (Q45). JS_SetBreakpoint() makes the instruction at
+   offset 'pc' of 'script' (JS_TAG_FUNCTION_BYTECODE) call the breakpoint handler
+   before it runs; JS_ClearBreakpoint() removes the breakpoint. They return -1 if 'pc'
+   is not the start of an instruction or has no breakpoint (and when out of memory,
+   with an exception pending), else 0. The handler runs with the frame of the
+   instruction as the current frame, and returns 0 to run the instruction, or -1 to
+   throw the pending exception there instead (an uncatchable one to terminate). */
+typedef int JSBreakpointHandler(JSContext *ctx, JSValueConst script, uint32_t pc,
+                                void *opaque);
+void JS_SetBreakpointHandler(JSRuntime *rt, JSBreakpointHandler *handler, void *opaque);
+int JS_SetBreakpoint(JSContext *ctx, JSValueConst script, uint32_t pc);
+int JS_ClearBreakpoint(JSRuntime *rt, JSValueConst script, uint32_t pc);
+/* Servo (debugger): hooks (Q46). The enter hook is called when the frame of a
+   bytecode function starts or resumes (a generator or async function), as the
+   current frame, before its next instruction; it returns 0, or -1 to throw its
+   exception there instead. The exit hook is called when the current bytecode frame
+   stops: it returned 'value', threw 'value', was terminated (an uncatchable
+   exception), or suspended (a yield or await) with 'value'; it returns 0, an
+   exception it leaves being dropped, or -1 for the frame to throw its exception
+   instead (an uncatchable one terminates). The native call hook is called before
+   a native function or constructor runs (not for bytecode functions, generators,
+   async functions, bound functions or proxies), and returns 0, or -1 to throw its
+   exception instead. A pending exception is put aside while the enter and exit
+   hooks run. */
+typedef enum JSFrameExitKind {
+    JS_FRAME_EXIT_RETURN,
+    JS_FRAME_EXIT_THROW,
+    JS_FRAME_EXIT_TERMINATE,
+    JS_FRAME_EXIT_SUSPEND,
+} JSFrameExitKind;
+typedef int JSFrameEnterHook(JSContext *ctx, void *opaque);
+typedef int JSFrameExitHook(JSContext *ctx, JSFrameExitKind kind, JSValueConst value,
+                            void *opaque);
+typedef int JSNativeCallHook(JSContext *ctx, JSValueConst func, void *opaque);
+void JS_SetFrameHooks(JSRuntime *rt, JSFrameEnterHook *enter, JSFrameExitHook *exit,
+                      void *opaque);
+void JS_SetNativeCallHook(JSRuntime *rt, JSNativeCallHook *hook, void *opaque);
+/* Servo (debugger): frames and scripts (Q47). Frames are those of the running
+   functions, innermost first, while they run; the function, script and 'this' of a
+   frame are borrowed. The script of a frame is its code (JS_TAG_FUNCTION_BYTECODE),
+   or JS_UNDEFINED for a native frame. A frame's pc is an offset in the instruction
+   it runs: the start of the instruction at a breakpoint and of the return in the
+   exit hook, a byte of the call in older frames, 0 before the first instruction.
+   'this' is the this argument as passed: not coerced for sloppy functions, and
+   undefined in derived constructors. Variables are numbered per kind as in the
+   script: the value of an uninitialized lexical variable is JS_UNINITIALIZED. The
+   getters and setters return -1 for a variable that doesn't exist, and for a
+   closure variable bound to a global that is no variable (such as an accessor
+   property), which code reads through the global object. */
+typedef struct JSStackFrame JSStackFrame;
+typedef enum JSVariableKind {
+    JS_VARIABLE_ARG,
+    JS_VARIABLE_LOCAL,
+    JS_VARIABLE_CLOSURE,
+} JSVariableKind;
+/* the binding a closure variable refers to */
+typedef enum JSBindingKind {
+    JS_BINDING_FUNCTION, /* of an enclosing function (or of the module, seen from a
+                            nested function) */
+    JS_BINDING_GLOBAL, /* global */
+    JS_BINDING_GLOBAL_DECL, /* global, declared by this code (a script or eval) */
+    JS_BINDING_MODULE, /* of the module */
+} JSBindingKind;
+typedef struct JSScriptInfo {
+    JSAtom func_name; /* borrowed */
+    int func_kind; /* 0: normal, 1: generator, 2: async, 3: async generator */
+    JS_BOOL is_toplevel; /* the code of a script, module or eval */
+    JS_BOOL is_eval; /* the code of eval() or Function() */
+    JS_BOOL is_strict;
+    JS_BOOL has_debug; /* without, there are no names or positions */
+    int line_num; /* where the function starts, 1-based */
+    int col_num;
+    uint32_t byte_code_len;
+    int arg_count;
+    int var_count;
+    int closure_var_count;
+} JSScriptInfo;
+typedef struct JSScriptVariable {
+    JSAtom name; /* borrowed, JS_ATOM_NULL if unknown */
+    JS_BOOL is_lexical;
+    JS_BOOL is_const;
+    JSBindingKind binding; /* of closure variables */
+} JSScriptVariable;
+typedef int JSScriptPositionCallback(void *opaque, uint32_t pc, int line_num, int col_num);
+typedef int JSScriptChildCallback(void *opaque, JSValueConst child);
+typedef int JSScriptOffsetCallback(void *opaque, uint32_t pc);
+JSStackFrame *JS_GetCurrentFrame(JSRuntime *rt);
+JSStackFrame *JS_GetOlderFrame(JSStackFrame *sf);
+JSValueConst JS_GetFrameFunction(JSStackFrame *sf);
+JSValueConst JS_GetFrameScript(JSStackFrame *sf);
+uint32_t JS_GetFramePC(JSStackFrame *sf);
+JSValueConst JS_GetFrameThis(JSStackFrame *sf);
+int JS_GetFrameVariable(JSContext *ctx, JSStackFrame *sf, JSVariableKind kind, int idx,
+                        JSValue *pval);
+/* consumes 'val' */
+int JS_SetFrameVariable(JSContext *ctx, JSStackFrame *sf, JSVariableKind kind, int idx,
+                        JSValue val);
+/* the code of a function written in JavaScript (borrowed), or JS_UNDEFINED */
+JSValueConst JS_GetFunctionScript(JSValueConst func);
+/* the call the instruction at 'pc' makes, with its number of arguments (-1 if
+   they are spread) */
+typedef enum JSCallKind {
+    JS_CALL_NONE,
+    JS_CALL_FUNCTION, /* f(), and spread and eval calls */
+    JS_CALL_METHOD, /* o.f() and o[k]() */
+    JS_CALL_CONSTRUCTOR, /* new F() */
+} JSCallKind;
+JSCallKind JS_GetScriptCall(JSRuntime *rt, JSValueConst script, uint32_t pc, int *pargc);
+int JS_GetScriptInfo(JSValueConst script, JSScriptInfo *info);
+int JS_GetScriptVariable(JSValueConst script, JSVariableKind kind, int idx,
+                         JSScriptVariable *var);
+/* The positions of a script: offsets where the line or column changes, in order, from
+   offset 0 (where the function starts); the last one for an offset counts. The
+   iterations stop when the callback returns non-zero, and return -1 if 'script' is
+   not a script. */
+int JS_IterateScriptPositions(JSValueConst script, JSScriptPositionCallback *cb,
+                              void *opaque);
+/* the line (1-based, 0 if unknown) and column of the instruction at 'pc' */
+int JS_GetScriptLocation(JSValueConst script, uint32_t pc, int *pcol_num);
+/* the scripts of the functions defined in a script (borrowed) */
+int JS_IterateScriptChildren(JSValueConst script, JSScriptChildCallback *cb, void *opaque);
+/* the offsets of the instructions that can change state outside the frame (not
+   counting calls): variables of other functions, global variables, properties,
+   prototypes, deletes, import(), direct eval and suspending */
+int JS_IterateScriptEffectfulOffsets(JSRuntime *rt, JSValueConst script,
+                                     JSScriptOffsetCallback *cb, void *opaque);
+/* the offsets of the backward jumps, one of which each iteration of a loop runs */
+int JS_IterateScriptLoopOffsets(JSRuntime *rt, JSValueConst script,
+                                JSScriptOffsetCallback *cb, void *opaque);
+/* the realm's eval function, whose calls by name are direct evals */
+JSValue JS_GetIntrinsicEval(JSContext *ctx);
+/* The global lexical declarations of the current realm (let, const and class at
+   the top level of scripts): their names (free with JS_FreePropertyEnum), and the
+   value of one, or -1 if there is no such declaration. */
+int JS_GetGlobalLexicalNames(JSContext *ctx, JSPropertyEnum **ptab, uint32_t *plen);
+int JS_GetGlobalLexicalVariable(JSContext *ctx, JSAtom name, JSValue *pval);
+/* Servo (debugger): the code of eval() and Function() (Q48). The hook is called when
+   they compiled code, before it runs: 'script' is its code, 'source' its text (for
+   Function, "(function anonymous(...\n) {\n...\n})"). It returns 0, an exception it
+   leaves being dropped, or -1 for eval() or Function() to throw its exception (an
+   uncatchable one terminates) instead of running the code. JS_GetScriptSourceURL()
+   returns the URL of the last sourceURL directive ("//# sourceURL=url", in a comment)
+   of the source of the code of a script, module or eval (a new atom), or
+   JS_ATOM_NULL. */
+typedef int JSNewScriptHook(JSContext *ctx, JSValueConst script, JS_BOOL is_function,
+                            const char *source, size_t source_len, void *opaque);
+void JS_SetNewScriptHook(JSRuntime *rt, JSNewScriptHook *hook, void *opaque);
+JSAtom JS_GetScriptSourceURL(JSContext *ctx, JSValueConst script);
+/* Servo (debugger): statement positions (Q49), where SpiderMonkey's debuggers
+   step. While enabled, the parser gives a position (see JS_IterateScriptPositions())
+   to the first instruction of: expression statements; return, throw, break and
+   continue statements; each initializer of a declaration (the pattern of a
+   destructuring one); the conditions of if, while, do-while and switch
+   statements, the object of with statements, the initialization, condition and
+   update of for statements and the object of for-in and for-of statements; and of
+   the implicit return at the closing brace of a function and at the end of a
+   script. Not when there is no instruction or it is dead code. The code of the
+   script, module or eval lists them all for its whole source: line and column
+   pairs, 1-based, in source order, until it is freed (so read them before it
+   runs). The getter returns their number (-1 if none were recorded). */
+void JS_SetDebuggerPositions(JSRuntime *rt, JS_BOOL enable);
+int JS_GetScriptStatementPositions(JSRuntime *rt, JSValueConst script, const uint32_t **ptab);
+#endif
 /* Servo: host hooks. The import.meta hook populates the new import.meta object of
    'm'. The dynamic import hook replaces the module loader for import(): 'm' is
    the module of the calling code, or NULL for script code, whose host-defined

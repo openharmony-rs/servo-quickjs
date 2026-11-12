@@ -257,6 +257,9 @@ DEF(is_undefined_or_null, 1, 1, 1, none)
 DEF(     private_in, 1, 2, 1, none)
 DEF(push_bigint_i32, 5, 0, 1, i32)
 /* must be the last non short and non temporary opcode */
+#ifdef CONFIG_DEBUGGER
+DEF(     breakpoint, 1, 0, 0, none) /* Servo: patched in by JS_SetBreakpoint() (Q45), never emitted */
+#endif
 DEF(            nop, 1, 0, 0, none)
 
 /* temporary opcodes: never emitted in the final bytecode */

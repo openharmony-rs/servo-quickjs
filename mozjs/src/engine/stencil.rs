@@ -16,6 +16,8 @@ use std::sync::atomic::{fence, AtomicUsize, Ordering};
 
 use servo_quickjs as q;
 
+#[cfg(qjs_debugger)]
+use super::eval::units;
 use super::eval::{eval, options, source_buffer, CompileOptions};
 use super::exception::throw_error;
 use super::Cx;
@@ -26,6 +28,17 @@ struct Stencil {
     refs: AtomicUsize,
     bytecode: Box<[u8]>,
     muted_errors: bool,
+    /// What debuggers are told about the script when it is instantiated.
+    #[cfg(qjs_debugger)]
+    source: ScriptSource,
+}
+
+#[cfg(qjs_debugger)]
+struct ScriptSource {
+    url: CString,
+    lineno: u32,
+    text: Box<[u8]>,
+    introduction_type: Option<&'static CStr>,
 }
 
 /// What a `JS::FrontendContext*` points to.
@@ -110,6 +123,15 @@ pub(crate) unsafe fn CompileGlobalScriptToStencil_C(
             refs: AtomicUsize::new(1),
             bytecode,
             muted_errors: options.base._base.mutedErrors_,
+            #[cfg(qjs_debugger)]
+            source: ScriptSource {
+                url: options.filename.clone(),
+                lineno: options.base.lineno,
+                text: units(srcBuf).into(),
+                // Introduction types are static strings.
+                introduction_type: (!options.base._base.introductionType.is_null())
+                    .then(|| CStr::from_ptr(options.base._base.introductionType)),
+            },
         })) as *mut root::JS::Stencil,
         Err(error) => {
             fc.failed = Some(FailedCompilation { source, error });
@@ -236,10 +258,54 @@ pub(crate) unsafe fn InstantiateGlobalStencil(
     } else {
         0
     };
+    #[cfg(qjs_debugger)]
+    if cx.debugger.is_active() {
+        return instantiate_for_debuggers(cx, stencil, flags);
+    }
     let bytecode = &stencil.bytecode;
     let script = q::JS_ReadScript(cx.qctx(), bytecode.as_ptr(), bytecode.len(), flags);
     if q::JS_IsException(script) != 0 {
         return ptr::null_mut();
+    }
+    cx.adopt(script).asBits_ as usize as *mut root::JSScript
+}
+
+/// Instantiates the script of a stencil while a debugger is active, which is told about it. The
+/// parser records statement positions and sourceURL directives for debuggers only while they are
+/// active, so the script is compiled again from its source.
+#[cfg(qjs_debugger)]
+unsafe fn instantiate_for_debuggers(cx: &Cx, stencil: &Stencil, flags: i32) -> *mut root::JSScript {
+    let source = &stencil.source;
+    let buf = source_buffer(source.lineno, source.text.as_ptr(), source.text.len());
+    let mut script = q::JS_Eval(
+        cx.qctx(),
+        buf.as_ptr() as *const c_char,
+        buf.len() - 1,
+        source.url.as_ptr(),
+        flags | (q::JS_EVAL_TYPE_GLOBAL | q::JS_EVAL_FLAG_COMPILE_ONLY) as i32,
+    );
+    if q::JS_IsException(script) != 0 {
+        // Compiling here can fail where the compiling thread succeeded, with less stack left: the
+        // bytecode then, with QuickJS's positions.
+        q::JS_FreeValue(cx.qctx(), q::JS_GetException(cx.qctx()));
+        let bytecode = &stencil.bytecode;
+        script = q::JS_ReadScript(cx.qctx(), bytecode.as_ptr(), bytecode.len(), flags);
+        if q::JS_IsException(script) != 0 {
+            return ptr::null_mut();
+        }
+    }
+    // A termination of a hook requests the interrupt again, which terminates the script when it
+    // runs.
+    if super::new_script(
+        cx,
+        script,
+        &source.url,
+        &source.text,
+        source.introduction_type.map_or(ptr::null(), CStr::as_ptr),
+        source.lineno,
+    ) < 0
+    {
+        super::reinterrupt(cx, cx.qctx());
     }
     cx.adopt(script).asBits_ as usize as *mut root::JSScript
 }

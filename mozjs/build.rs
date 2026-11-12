@@ -20,6 +20,11 @@ fn main() {
             .expect("failed to run python3");
         assert!(status.success(), "stub_bindings.py failed for {name}");
     }
+    // QuickJS has the patches for debuggers (see servo-quickjs's build script).
+    println!("cargo:rustc-check-cfg=cfg(qjs_debugger)");
+    if std::env::var_os("DEP_QUICKJS_DEBUGGER").is_some() {
+        println!("cargo:rustc-cfg=qjs_debugger");
+    }
     println!("cargo:rustc-check-cfg=cfg(qjs_pool_stats)");
     if std::env::var("QJS_POOL_STATS").is_ok_and(|v| !v.is_empty() && v != "0") {
         println!("cargo:rustc-cfg=qjs_pool_stats");

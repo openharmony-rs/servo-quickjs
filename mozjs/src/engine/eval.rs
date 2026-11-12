@@ -77,6 +77,58 @@ pub(crate) unsafe fn eval(
     )
 }
 
+/// Compiles and runs a classic script. With a debugger, it is told about the code (`text` is its
+/// source) before the code runs.
+unsafe fn evaluate(
+    cx: &Cx,
+    options: &CompileOptions,
+    src: &[u8],
+    text: &[u8],
+    flags: i32,
+) -> q::JSValue {
+    if !cx.debugger.is_active() {
+        return eval(cx, options, src, flags);
+    }
+    let code = eval(
+        cx,
+        options,
+        src,
+        flags | q::JS_EVAL_FLAG_COMPILE_ONLY as i32,
+    );
+    if code.tag() == q::JS_TAG_EXCEPTION {
+        return code;
+    }
+    new_script(cx, options, code, text);
+    q::JS_EvalFunction(cx.qctx(), code)
+}
+
+/// Tells the debuggers about the code of a new script. A termination of a hook requests the
+/// interrupt again, which terminates the script that runs.
+unsafe fn new_script(cx: &Cx, options: &CompileOptions, code: q::JSValue, text: &[u8]) {
+    if super::new_script(
+        cx,
+        code,
+        &options.filename,
+        text,
+        options.base._base.introductionType,
+        options.base.lineno,
+    ) < 0
+    {
+        super::reinterrupt(cx, cx.qctx());
+    }
+}
+
+/// The UTF-8 code units of a source.
+pub(crate) unsafe fn units<'a>(
+    srcBuf: *mut root::JS::SourceText<root::mozilla::Utf8Unit>,
+) -> &'a [u8] {
+    let len = (*srcBuf).length_ as usize;
+    if len == 0 {
+        return &[];
+    }
+    std::slice::from_raw_parts((*srcBuf).units_ as *const u8, len)
+}
+
 pub(crate) unsafe fn Evaluate2(
     cx: *mut root::JSContext,
     options: *const root::JS::ReadOnlyCompileOptions,
@@ -90,7 +142,13 @@ pub(crate) unsafe fn Evaluate2(
         (*srcBuf).units_ as *const u8,
         (*srcBuf).length_ as usize,
     );
-    let result = eval(cx, options, &src, q::JS_EVAL_TYPE_GLOBAL as i32);
+    let result = evaluate(
+        cx,
+        options,
+        &src,
+        units(srcBuf),
+        q::JS_EVAL_TYPE_GLOBAL as i32,
+    );
     if result.tag() == q::JS_TAG_EXCEPTION {
         return false;
     }
@@ -115,6 +173,7 @@ pub(crate) unsafe fn Compile1(
     if result.tag() == q::JS_TAG_EXCEPTION {
         return ptr::null_mut();
     }
+    new_script(cx, options, result, units(srcBuf));
     cx.adopt(result).asBits_ as usize as *mut root::JSScript
 }
 
@@ -159,8 +218,20 @@ pub(crate) unsafe fn Evaluate(
 ) -> bool {
     let cx = Cx::from_raw(cx);
     let options = self::options(options);
-    let src = padded(options.base.lineno, &utf16_source(srcBuf));
-    let result = eval(cx, options, &src, q::JS_EVAL_TYPE_GLOBAL as i32);
+    let text = utf16_source(srcBuf);
+    let src = padded(options.base.lineno, &text);
+    let text = if cx.debugger.is_active() {
+        text
+    } else {
+        String::new()
+    };
+    let result = evaluate(
+        cx,
+        options,
+        &src,
+        text.as_bytes(),
+        q::JS_EVAL_TYPE_GLOBAL as i32,
+    );
     if result.tag() == q::JS_TAG_EXCEPTION {
         return false;
     }
@@ -175,12 +246,19 @@ pub(crate) unsafe fn Compile(
 ) -> *mut root::JSScript {
     let cx = Cx::from_raw(cx);
     let options = self::options(options);
-    let src = padded(options.base.lineno, &utf16_source(srcBuf));
+    let text = utf16_source(srcBuf);
+    let src = padded(options.base.lineno, &text);
+    let text = if cx.debugger.is_active() {
+        text
+    } else {
+        String::new()
+    };
     let flags = (q::JS_EVAL_TYPE_GLOBAL | q::JS_EVAL_FLAG_COMPILE_ONLY) as i32;
     let result = eval(cx, options, &src, flags);
     if result.tag() == q::JS_TAG_EXCEPTION {
         return ptr::null_mut();
     }
+    new_script(cx, options, result, text.as_bytes());
     cx.adopt(result).asBits_ as usize as *mut root::JSScript
 }
 
@@ -276,7 +354,7 @@ unsafe fn compile_function(
     if is_identifier(&name) {
         flags |= q::JS_EVAL_FLAG_STANDALONE_FUNCTION as i32;
     }
-    let outer = eval(cx, options, &buf, flags);
+    let outer = evaluate(cx, options, &buf, body.as_bytes(), flags);
     if outer.tag() == q::JS_TAG_EXCEPTION {
         return ptr::null_mut();
     }

@@ -13,7 +13,11 @@ publish = false
 doctest = false
 
 [features]
-default = ["jit", "libz-sys", "intl"]
+default = ["jit", "libz-sys", "intl", "debugger"]
+# The emulation of SpiderMonkey's `Debugger` API, for Servo's devtools (`JS_DefineDebuggerObject`).
+# Without it, the shim and QuickJS carry no debugger code. Servo builds turn it on with
+# `SERVO_QUICKJS_DEBUGGER=1` instead, as SpiderMonkey's mozjs has no such feature.
+debugger = ["servo-quickjs/debugger"]
 # Accepted for compatibility with Servo's feature forwarding; no effect on QuickJS.
 crown = []
 debugmozjs = []

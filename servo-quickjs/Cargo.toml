@@ -10,6 +10,9 @@ links = "quickjs"
 build = "build.rs"
 
 [features]
+# The patches for debuggers (Q45 to Q49), which mozjs's emulation of SpiderMonkey's `Debugger`
+# needs. `SERVO_QUICKJS_DEBUGGER=1` builds them too.
+debugger = []
 # Print objects still alive when a runtime is freed (QuickJS DUMP_LEAKS).
 dump-leaks = []
 

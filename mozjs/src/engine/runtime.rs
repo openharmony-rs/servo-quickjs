@@ -41,6 +41,7 @@ pub(crate) unsafe fn JS_NewContext(
         warning_reporter: Cell::new(None),
         hooks: Default::default(),
         base_key_object: Cell::new(base_key_object),
+        debugger: Default::default(),
     }));
     q::JS_SetRuntimeOpaque(rt, cx as *mut _);
     set_current(cx);
@@ -55,6 +56,7 @@ pub(crate) unsafe fn JS_DestroyContext(raw: *mut root::JSContext) {
         cx.leave_realm();
     }
     super::free_microtasks(cx);
+    super::free_debuggers(cx);
     cx.drain_pool((0, 0));
     q::JS_FreeValueRT(cx.rt, cx.base_key_object.replace(q::JS_UNDEFINED));
     q::JS_FreeContext(cx.base_ctx);

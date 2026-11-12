@@ -5,6 +5,8 @@ fn main() {
     let out = std::path::Path::new("servo-quickjs/src");
     bindgen::Builder::default()
         .header("servo-quickjs/quickjs/quickjs.h")
+        // The debugger API stays declared; mozjs only calls it when QuickJS has it.
+        .clang_arg("-DCONFIG_DEBUGGER")
         .allowlist_function("(__)?JS_.*|js_.*")
         .allowlist_type("JS.*")
         .allowlist_var("JS_.*")
