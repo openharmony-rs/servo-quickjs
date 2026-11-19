@@ -1476,6 +1476,8 @@ pub(crate) unsafe fn SetForEach(
 // object, and its methods are script-replaceable. Instead the map is an id, and the holder is
 // kept by the accessing realm's key object: no script runs, and nothing the object keeps alive
 // refers to the accessing realm. A holder map's entries are freed with the accessing realms.
+// A holder map has no entries for other keys: getting one gives undefined, as in SpiderMonkey,
+// and setting one fails.
 
 pub(crate) unsafe fn NewWeakMapObject(cx: *mut root::JSContext) -> *mut root::JSObject {
     let cx = Cx::from_raw(cx);
@@ -1504,6 +1506,7 @@ pub(crate) unsafe fn GetWeakMapEntry(
     let (map, key) = (obj_val(*mapObj.ptr), (*key.ptr).to_qjs());
     let v = match intrinsics::holder(cx.rt, map, key) {
         Some(v) => v,
+        None if intrinsics::is_holder_map(map) => q::JS_UNDEFINED,
         None => call_method(cx, CLASS_WEAKMAP, c"get", map, &[key]),
     };
     set_result(cx, v, val)

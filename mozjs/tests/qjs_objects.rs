@@ -310,13 +310,13 @@ fn collections() {
         ));
         assert_eq!(out.get().to_int32(), 42);
         rooted!(&in(cx) let plain_key = ObjectValue(JS_NewPlainObject(cx)));
-        assert!(!GetWeakMapEntry(
+        assert!(GetWeakMapEntry(
             cx,
             weak.handle(),
             plain_key.handle(),
             out.handle_mut()
         ));
-        mozjs::rust::wrappers2::JS_ClearPendingException(cx);
+        assert!(out.get().is_undefined());
     });
 }
 
