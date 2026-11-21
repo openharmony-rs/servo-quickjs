@@ -23,6 +23,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo fmt --check
         working-directory: fuzz
+      # `engine-contract` is a separate workspace, so `cargo fmt --all` above cannot see it.
+      - run: engine-contract/tools/run.sh check-rustfmt
 
   test:
     runs-on: ubuntu-24.04

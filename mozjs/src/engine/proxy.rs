@@ -1164,6 +1164,7 @@ pub(crate) unsafe fn NewWindowProxy(
     aObj: root::JS::HandleObject,
     aHandler: *const ::std::os::raw::c_void,
 ) -> *mut root::JSObject {
+    crate::engine::call_log::enter_inner("WrapperNew");
     WrapperNew(aCx, aObj, aHandler, &WINDOW_PROXY_CLASS)
 }
 

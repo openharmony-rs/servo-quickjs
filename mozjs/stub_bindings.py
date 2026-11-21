@@ -100,6 +100,9 @@ STATIC_INIT = {
 # Built with `QJS_POOL_STATS=1`: each forwarding stub records which API function is running, and
 # whether it returns a raw GC pointer (see `src/engine/pool_stats.rs`).
 POOL_STATS = os.environ.get("QJS_POOL_STATS", "") not in ("", "0")
+# Built with `QJS_CALL_LOG=1`: each forwarding stub records the entry point it runs, and the set is
+# written when a runtime is destroyed (see `src/engine/call_log.rs`).
+CALL_LOG = os.environ.get("QJS_CALL_LOG", "") not in ("", "0")
 RAW_GC_POINTER = re.compile(r"->\s*\*mut\s+root::(JSObject|JSString|JSLinearString|JSFunction|JSScript|JS::BigInt|JS::Symbol)\b")
 LINK_NAME = re.compile(r'#\[link_name = "(?:[^"\\]|\\.)*"\]\s*')
 
@@ -120,6 +123,8 @@ def convert_item(item, indent, implemented, stats):
         if name in implemented and len(param_names(params)) in implemented[name]:
             args = ", ".join(param_names(params))
             body = f"crate::engine::{name}({args})"
+            if CALL_LOG:
+                body = f"let _call = crate::engine::call_log::enter(\"{name}\"); {body}"
             if POOL_STATS:
                 raw = "true" if RAW_GC_POINTER.search(ret) else "false"
                 body = f"let _api = crate::engine::pool_stats::enter(\"{name}\", {raw}); {body}"

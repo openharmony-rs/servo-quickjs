@@ -702,6 +702,7 @@ pub(crate) unsafe fn JS_DequeueNextMicroTask(
     cx: *mut root::JSContext,
     task: root::JS::MutableHandle<root::JS::GenericMicroTask>,
 ) {
+    crate::engine::call_log::enter_inner("DequeueNextRegularMicroTask");
     *task.ptr = DequeueNextRegularMicroTask(cx);
 }
 

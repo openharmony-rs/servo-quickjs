@@ -1045,6 +1045,7 @@ pub(crate) unsafe fn DefineFunctionWithReserved(
     nargs: ::std::os::raw::c_uint,
     attrs: ::std::os::raw::c_uint,
 ) -> *mut root::JSFunction {
+    crate::engine::call_log::enter_inner("JS_DefineFunction");
     super::JS_DefineFunction(
         cx,
         root::JS::Handle::from_marked_location(&obj),
@@ -1151,6 +1152,7 @@ pub(crate) unsafe fn Construct1(
     args: *const root::JS::HandleValueArray,
     objp: root::JS::MutableHandle<*mut root::JSObject>,
 ) -> bool {
+    crate::engine::call_log::enter_inner("Construct");
     let no_new_target: *mut root::JSObject = ptr::null_mut();
     super::Construct(
         cx,

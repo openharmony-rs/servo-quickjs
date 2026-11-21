@@ -1,0 +1,227 @@
+# Reviewed mozjs usage that the conservative scanner cannot reproduce.
+#
+# Source: servo-wiki/tools/mozjs_usage_xlsx.py REVIEWED_USAGE. These entries are reached
+# through method calls on mozjs wrapper types, generic TypedArray helpers, generated
+# bindings, or callback registrations rather than a direct `js::` call, so scan_scope.py
+# deliberately skips them. Each entry still has a contract case; `scope_manifest.py` merges
+# this review list into servo-mozjs-api-usage.toml so coverage and usage checks stay in sync.
+
+[[entry]]
+name = "AppendToEnvironmentChain"
+mode = "indirect"
+evidence = "components/script/dom/event/eventtarget.rs:748,751,753,755 -> mozjs rust.rs:1263"
+
+[[entry]]
+name = "BuildStackString"
+mode = "indirect"
+evidence = "components/script/dom/bindings/error.rs:65; components/script/dom/webgl/webglrenderingcontext.rs:2245 -> mozjs rust.rs:1185"
+
+[[entry]]
+name = "CallJitGetterOp"
+mode = "direct"
+evidence = "components/script_bindings/utils.rs:640"
+
+[[entry]]
+name = "CallJitMethodOp"
+mode = "direct"
+evidence = "components/script_bindings/utils.rs:617"
+
+[[entry]]
+name = "CallOriginalPromiseResolve"
+mode = "direct"
+evidence = "components/script/dom/promise/promise.rs:292"
+
+[[entry]]
+name = "CurrentGlobal"
+mode = "indirect"
+evidence = "components/script AutoRealm/CurrentRealm -> mozjs realm.rs:255"
+
+[[entry]]
+name = "GetArrayBufferLengthAndData"
+mode = "indirect"
+evidence = "components/script_bindings/buffer_source.rs -> TypedArray<ArrayBufferU8>::length_and_data"
+
+[[entry]]
+name = "GetArrayBufferViewLengthAndData"
+mode = "indirect"
+evidence = "components/script_bindings/buffer_source.rs -> TypedArray<ArrayBufferViewU8>::length_and_data"
+
+[[entry]]
+name = "GetFloat32ArrayLengthAndData"
+mode = "indirect"
+evidence = "components/script_bindings/buffer_source.rs -> TypedArray<Float32>::length_and_data"
+
+[[entry]]
+name = "GetFloat64ArrayLengthAndData"
+mode = "indirect"
+evidence = "components/script_bindings/buffer_source.rs -> TypedArray<Float64>::length_and_data"
+
+[[entry]]
+name = "GetInt32ArrayLengthAndData"
+mode = "indirect"
+evidence = "components/script_bindings/buffer_source.rs -> TypedArray<Int32>::length_and_data"
+
+[[entry]]
+name = "GetRealmFunctionPrototype"
+mode = "indirect"
+evidence = "components/script_bindings/codegen/codegen.py:4001; generated Bindings"
+
+[[entry]]
+name = "GetSavedFrameParent"
+mode = "indirect"
+evidence = "components/script/dom/console.rs:1358 -> mozjs rust.rs:1220"
+
+[[entry]]
+name = "GetUint32ArrayLengthAndData"
+mode = "indirect"
+evidence = "components/script_bindings/buffer_source.rs -> TypedArray<Uint32>::length_and_data"
+
+[[entry]]
+name = "GetUint8ArrayLengthAndData"
+mode = "indirect"
+evidence = "components/script_bindings/buffer_source.rs -> TypedArray<Uint8>::length_and_data"
+
+[[entry]]
+name = "GetUint8ClampedArrayLengthAndData"
+mode = "indirect"
+evidence = "components/script_bindings/buffer_source.rs -> TypedArray<ClampedU8>::length_and_data"
+
+[[entry]]
+name = "JS_DefineElement"
+mode = "indirect"
+evidence = "mozjs conversions.rs:732 ToJSValConvertible for [T]"
+
+[[entry]]
+name = "JS_DefinePropertyById2"
+mode = "indirect"
+evidence = "components/script_bindings/codegen/codegen.py:4035; generated Bindings"
+
+[[entry]]
+name = "JS_GetPropertyDescriptorById"
+mode = "indirect"
+evidence = "components/script_bindings/codegen/codegen.py:6821; generated Bindings"
+
+[[entry]]
+name = "JS_GetTypedArraySharedness"
+mode = "indirect"
+evidence = "components/script/dom/audio/audiobuffer.rs:296,339; components/script/dom/stream/readablestreamdefaultreader.rs:166 -> mozjs typedarray.rs:267"
+
+[[entry]]
+name = "JS_GlobalObjectTraceHook"
+mode = "indirect"
+evidence = "components/script_bindings/codegen/codegen.py:2738; generated trace_hook"
+
+[[entry]]
+name = "JS_InitializePropertiesFromCompatibleNativeObject"
+mode = "direct"
+evidence = "components/script_bindings/wrap.rs:134"
+
+[[entry]]
+name = "JS_NewFloat32Array"
+mode = "indirect"
+evidence = "mozjs typedarray.rs TypedArray<Float32>::create"
+
+[[entry]]
+name = "JS_NewFloat64Array"
+mode = "indirect"
+evidence = "mozjs typedarray.rs TypedArray<Float64>::create"
+
+[[entry]]
+name = "JS_NewInt32Array"
+mode = "indirect"
+evidence = "mozjs typedarray.rs TypedArray<Int32>::create"
+
+[[entry]]
+name = "JS_NewObjectWithoutMetadata"
+mode = "indirect"
+evidence = "components/script_bindings/codegen/codegen.py:4110; generated Bindings"
+
+[[entry]]
+name = "JS_NewUint32Array"
+mode = "indirect"
+evidence = "mozjs typedarray.rs TypedArray<Uint32>::create"
+
+[[entry]]
+name = "JS_NewUint8Array"
+mode = "indirect"
+evidence = "mozjs typedarray.rs TypedArray<Uint8>::create"
+
+[[entry]]
+name = "JS_NewUint8ClampedArray"
+mode = "indirect"
+evidence = "mozjs typedarray.rs TypedArray<ClampedU8>::create"
+
+[[entry]]
+name = "JS_SetElement"
+mode = "indirect"
+evidence = "components/script_bindings/codegen/codegen.py:4983,5044; generated Bindings"
+
+[[entry]]
+name = "UnwrapFloat32Array"
+mode = "indirect"
+evidence = "mozjs typedarray.rs TypedArray<Float32>"
+
+[[entry]]
+name = "UnwrapFloat64Array"
+mode = "indirect"
+evidence = "mozjs typedarray.rs TypedArray<Float64>"
+
+[[entry]]
+name = "UnwrapInt32Array"
+mode = "indirect"
+evidence = "mozjs typedarray.rs TypedArray<Int32>"
+
+[[entry]]
+name = "UnwrapUint32Array"
+mode = "indirect"
+evidence = "mozjs typedarray.rs TypedArray<Uint32>"
+
+[[entry]]
+name = "UnwrapUint8Array"
+mode = "indirect"
+evidence = "mozjs typedarray.rs TypedArray<Uint8>"
+
+[[entry]]
+name = "UnwrapUint8ClampedArray"
+mode = "indirect"
+evidence = "mozjs typedarray.rs TypedArray<ClampedU8>"
+
+# Reached through an entry that Servo calls directly, but not through a plain Rust call the
+# scanner can follow: a wrapper method call on a mixed-ownership value, a generated binding, or a
+# conversion helper. Found by tracing every implemented entry while running WPT with
+# `QJS_CALL_LOG=1`, and checked against the QJS contract log.
+
+[[entry]]
+name = "JS_EncodeStringToLatin1"
+mode = "indirect"
+evidence = "engine/string.rs:635 JS_EncodeStringToASCII -> :639 JS_EncodeStringToLatin1"
+
+[[entry]]
+name = "JS_GetEmptyString"
+mode = "indirect"
+evidence = "engine/string.rs:433 JS_GetEmptyStringValue -> :434 JS_GetEmptyString"
+
+[[entry]]
+name = "JS_ValueToObject"
+mode = "indirect"
+evidence = "engine/string.rs:933 ToObjectSlow -> :944 super::JS_ValueToObject"
+
+[[entry]]
+name = "RealmBehaviorsRef"
+mode = "indirect"
+evidence = "engine/proxy.rs:1862 RealmBehaviorsRef1 -> :1864 RealmBehaviorsRef"
+
+[[entry]]
+name = "RealmCreationOptionsRef"
+mode = "indirect"
+evidence = "engine/proxy.rs:1850 RealmCreationOptionsRef1 -> :1852 RealmCreationOptionsRef"
+
+[[entry]]
+name = "UnwrapArrayBuffer"
+mode = "indirect"
+evidence = "mozjs typedarray.rs:459 -> UnwrapArrayBuffer"
+
+[[entry]]
+name = "UnwrapArrayBufferView"
+mode = "indirect"
+evidence = "mozjs typedarray.rs:467 -> UnwrapArrayBufferView"

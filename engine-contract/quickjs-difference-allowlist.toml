@@ -1,0 +1,288 @@
+# Known QuickJS defects relative to the SpiderMonkey contract.
+#
+# SpiderMonkey is the reference implementation. Each entry names one case and the compared fields
+# that may differ. The comparison still prints every known defect; an unlisted difference fails
+# the run. Never add an entry merely to silence a failure, and remove it when the shim is fixed.
+#
+# status:   pending | bug | accepted | wontfix. Only accepted and wontfix are released by
+#           `run.sh compare-engine-results`; pending and bug still fail the comparison.
+# severity: P0 | P1 | P2 | P3. P0 and P1 cannot be released as accepted/wontfix.
+#
+# Optional: `issue` links the tracking issue for a difference that is still present. `pending`
+# and `bug` entries must name a real tracking issue; accepted/wontfix entries may omit it.
+#
+# Optional: `steps` names the sub-scenarios whose failures this entry covers. Every
+# `fields.step_failures` entry in either result must appear here; without it a newly exposed
+# sub-scenario would be absorbed by a case-level `fields` entry.
+#
+# Optional: `panic` is an exact QuickJS panic fingerprint. Use it instead of relying on
+# `fields = ["fields"]` for a case that aborts: panic text that changes, or a panic where none is
+# listed, fails the comparison. When a difference is fixed, add a record to
+# `quickjs-shim-fix-records.md`, then
+# delete the entry here.
+
+[[difference]]
+id = "rooter.trace_on_gc"
+fields = ["fields"]
+reason = "QuickJS does not invoke CustomAutoRooter trace callbacks during an explicit collection"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "eval.environment_chain"
+fields = ["fields", "apis"]
+steps = ["environment_chain"]
+panic = """assertion `left == right` failed
+  left: 12
+ right: 13"""
+reason = "QuickJS wraps environment-chain scopes in append order, so a later appended outer scope shadows an earlier inner scope; SpiderMonkey gives earlier appends precedence"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P2"
+
+[[difference]]
+id = "objects.core"
+fields = ["fields", "apis"]
+steps = ["property_keys", "get_weak_map_entry"]
+panic = """assertion `left == right` failed
+  left: ([3], 1)
+ right: ([], 0)"""
+reason = "JSITER_SYMBOLSONLY is a proxy-only flag in SpiderMonkey; QuickJS also treats it as symbol selection for ordinary objects"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "strings.core"
+fields = ["fields", "apis"]
+steps = ["value_to_source"]
+panic = '''assertion `left == right` failed: ValueToSource(({a: 1, 'b c': [2], 3: undefined, [Symbol.iterator]: 0}))
+  left: "({3:(void 0), a:1, \"b c\":[2], [Symbol.iterator]:0})"
+ right: "({3:(void 0), a:1, 'b c':[2], [Symbol.iterator]:0})"'''
+reason = "JS_ValueToSource uses double quotes for property names; SpiderMonkey keeps the source quote style"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "misc.gc_state"
+fields = ["fields", "apis"]
+panic = """assertion `left == right` failed
+  left: "Object"
+ right: "JS Object\""""
+reason = "GCTraceKindToAscii returns QuickJS class names such as Object; SpiderMonkey returns JS Object"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "errors.core"
+fields = ["fields", "apis"]
+steps = [
+    "report_thrown_error_location",
+    "report_error_from_exception",
+    "stacks",
+    "build_stack_string",
+    "get_saved_frame_column",
+    "describe_scripted_caller",
+]
+panic = """assertion `left == right` failed
+  left: (2, 22)
+ right: (2, 9)"""
+reason = "QuickJS reports the Error construction column; SpiderMonkey reports the throw site column"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "edge.eval.compile_and_environment"
+fields = ["fields", "apis"]
+panic = """assertion `left == right` failed: inner scope must shadow the later appended outer scope
+  left: 12
+ right: 13"""
+reason = "QuickJS appends environment-chain scopes in the opposite order; the compiled function therefore sees 12 instead of 13"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P2"
+
+[[difference]]
+id = "edge.promise.states_and_queue"
+fields = ["fields"]
+reason = "QuickJS polls its interrupt handler every 10000 bytecode operations, so a requested interrupt is still pending when this 1000-iteration script finishes; the script completes with result 1000 and the callback has not run yet"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "edge.typed_arrays_shared_detach"
+fields = ["fields"]
+reason = "QuickJS supports SharedArrayBuffer and SharedArrayBuffer-backed views; this SpiderMonkey build reports shared memory as unavailable"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "edge.weakmap"
+fields = ["fields"]
+panic = "assertion failed: GetWeakMapEntry(cx, weak.handle(), key.handle(), out.handle_mut())"
+reason = "QuickJS holder maps only accept realm key objects; GetWeakMapEntry with an ordinary object key returns false"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "edge.weakmap_overwrite"
+fields = ["fields"]
+panic = "assertion failed: SetWeakMapEntry(cx, weak.handle(), key.handle(), one.handle())"
+reason = "QuickJS holder maps only accept realm key objects; SetWeakMapEntry with an ordinary object key returns false"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "misc.gc_callbacks"
+fields = ["fields", "apis"]
+panic = "assertion failed: gc_callback_calls.parse::<u32>().unwrap_or(0) > 0"
+reason = "QuickJS keeps JS_SetGCCallback, SetGCSliceCallback, JS_AddExtraGCRootsTracer and JS_Get/SetGCParameter as silent no-ops: registered callbacks and extra-root tracers never run during JS_GC, the slice slot reports itself as already installed (the shim returns None), and GC parameters read back as 0"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "misc.roots_options_memory"
+fields = ["fields", "apis"]
+panic = """assertion `left == right` failed: RemoveRawValueRoot did not release the object
+  left: 0
+ right: 1"""
+reason = "QuickJS's raw-value root retains an extra reference after RemoveRawValueRoot, so the object is not finalized by the following JS_GC"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P2"
+
+[[difference]]
+id = "realm.enter_exit_and_private"
+fields = ["fields"]
+reason = "QuickJS invokes the global trace hook twice for one explicit collection; SpiderMonkey invokes it once"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "runtime.context_lifecycle"
+fields = ["fields"]
+reason = "QuickJS's JS_Get/SetGCParameter do not persist the SpiderMonkey GC parameter values; reads return 0 and writes are not reflected back"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "debugger.new_global_object_hook"
+fields = ["fields"]
+reason = "JS_FireOnNewGlobalObject is a no-op in QuickJS: the debugger emulation declares Debugger.onNewGlobalObject but never calls it, so the hook fires 0 times instead of 1"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "class.edge_tracers"
+fields = ["fields"]
+reason = "SpiderMonkey keeps the four raw-slot referents (object, value, array element and a property descriptor's getter) alive while tracing and collects all of them when tracing is disabled (0 vs 4 finalizers). QuickJS binds CallObjectRootTracer, CallValueRootTracer, CallPropertyDescriptorTracer and TraceValueArray to no-ops and its autorelease pool keeps the children alive for the whole task, so neither pass finalizes anything (0 vs 0)"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P2"
+
+[[difference]]
+id = "realm.compartments"
+fields = ["fields"]
+reason = "QuickJS reports IsSystemCompartment as a constant false and has no system zone: a realm created with JS_SetTrustedPrincipals in effect is still not a system compartment, while SpiderMonkey counts one"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "misc.standard_classes"
+fields = ["fields"]
+steps = ["enumerate", "atomize_and_resolve"]
+panic = "standard class enumeration returned no names"
+reason = "QuickJS implements JS_NewEnumerateStandardClasses, JS_ResolveStandardClass and JS_MayResolveStandardClass as no-ops, so no lazily resolved standard class names are enumerated"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "promise.internal_job_queue"
+fields = ["fields", "apis"]
+panic = "assertion failed: HasAnyMicroTasks(cx)"
+reason = "QuickJS does not enqueue promise reactions into the internal job queue exposed to HasAnyMicroTasks; RunJobs still drains QuickJS's own queue"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "streaming.consume_callback"
+fields = ["fields"]
+reason = "QuickJS has no WebAssembly and binds the StreamConsumer glue entry points to qjs_todo!; the case records the unavailable streaming precondition and does not call them"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+# ---------------------------------------------------------------------------
+# Cases that cannot yet prove anything about the entry points they name
+# ---------------------------------------------------------------------------
+# These are NOT differences. Do not copy them into [[difference]] entries: nothing here fails the
+# comparison today, because the case never observes a value that would change if the entry point
+# became a no-op. The list exists so the next person knows which coverage is real and which is
+# only nominal. Remove a line when its case gains a causal assertion.
+#
+# Recheck with the SpiderMonkey results: every case below either never calls the name it declares,
+# or reports a field that is identical on both engines by construction.
+#
+#   rg '"id": "(class.edge_tracers|event_loop.dispatchable_run|misc.build_ids|...)"' \
+#      target/contract/spidermonkey-contract-results.jsonl
+#
+# A. The entry point is never invoked by the case.
+#    event_loop.dispatchable_run        DispatchableRun
+#      JS::Dispatchable has no public constructor and a private vtable; a fake one would be UB.
+#      Needs C++ glue that hands the harness a real dispatchable.
+#    misc.jit_backend                   DisableJitBackend
+#      Must run before JS_Init and before any JSContext exists, but the suite shares one live
+#      engine. Needs a separate test binary.
+#    misc.process_lifecycle             JS_Init, JS_ShutDown
+#      Process-global and single-shot; JS_ShutDown would tear down the engine mid-run. The case
+#      only checks that a second JSEngine::init is rejected. Needs a separate test binary.
+#    stencil.offthread_compile_instantiate
+#                                       PrepareForInstantiate
+#      Reached only through the mozjs off-thread wrapper, and only its success value is observed
+#      (a false return would fail the case). An always-true shim cannot be told apart because no
+#      rejected (frontend context, stencil, storage) combination is constructible safely.
+#
+# B. The entry point is invoked, but the recorded field does not depend on it.
+#    realm.compartments                 AssertSameCompartment, IsSharableCompartment
+#      AssertSameCompartment is a debug-only assertion: in a release build it is compiled out, and
+#      a mismatched compartment aborts rather than producing a comparable observation.
+#      IsSharableCompartment is hard-coded true in the shim, and every realm this harness can
+#      create is sharable on SpiderMonkey too, so `sharable == total` passes on both engines.
+#    misc.engine_options                JS_SetGlobalJitCompilerOption,
+#                                       JS_SetOffthreadIonCompilationEnabled
+#      The setters return void. Reading back through JS_GetGlobalJitCompilerOption returns 0 for
+#      every option before and after the write on this build, including warmup triggers whose
+#      defaults are non-zero, so there is no value to compare.
+#    misc.self_hosted_code              InitSelfHostedCode
+#      The assertion is that [].map works, which does not depend on the call. No negative control
+#      exists in this harness: skipping, repeating or passing a SelfHostedWriter all segfault
+#      inside SpiderMonkey, and the cache is an opaque array passed by value.
+#    misc.build_ids                     SetBuildId, SetProcessBuildIdOp
+#      BuildIdCharVector is opaque with no accessor, SpiderMonkey has no GetBuildId, and the
+#      stencil encoder that would invoke the callback is not exported by bindgen.
+#    proxy.wrapper_callbacks            SetPreserveWrapperCallbacks
+#      The callbacks only fire when a cross-compartment wrapper is preserved, which needs a DOM
+#      proxy or an Xray wrapper. Neither exists in the suite.
+#    class.edge_tracers                 CallBigIntTracer, CallSymbolTracer, CallIdTracer
+#      BigInts and symbols have no object finalizer to count, atoms are reference-counted rather
+#      than collected, and proving they were marked needs IsAboutToBeFinalized, which bindgen
+#      does not export. CallPropertyDescriptorTracer is covered only in aggregate: the negative
+#      control disables the whole trace body, so it does not isolate that one call.
+#
+# Totals: 10 cases; 16 entry points with no causal check, plus CallPropertyDescriptorTracer
+# covered only in aggregate (17 names).

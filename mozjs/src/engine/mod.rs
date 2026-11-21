@@ -24,6 +24,7 @@ use reentrant::Stack;
 
 mod atom;
 mod buffer;
+pub(crate) mod call_log;
 mod class;
 mod clone;
 #[cfg(qjs_debugger)]
