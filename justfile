@@ -91,6 +91,51 @@ run page *args:
 wpt log *tests:
     cd {{servo}} && QJS_VERIFY_TRACING=1 ./mach test-wpt --bin {{servo_target}}/debug/servoshell --log-raw {{log}} {{tests}}
 
+# Coverage of the shim, and of SpiderMonkey, by the tests and by WPT (docs/coverage.md).
+coverage_dir := target + "/coverage"
+coverage_servo_target := absolute_path(env_var_or_default("SERVO_COVERAGE_TARGET_DIR", servo_target + "-coverage"))
+coverage_servo_sm_target := absolute_path(env_var_or_default("SERVO_COVERAGE_SM_TARGET_DIR", servo_target + "-coverage-sm"))
+coverage_servo_profile := env_var_or_default("SERVO_COVERAGE_PROFILE", "medium")
+coverage_servo_profile_dir := if coverage_servo_profile == "dev" { "debug" } else { coverage_servo_profile }
+
+# The unit-side report: instrumented tests on QuickJS, the same tests on SpiderMonkey, and the report.
+coverage: coverage-units coverage-sm coverage-report
+
+# Run each mozjs test alone in an instrumented build, with its own profile.
+coverage-units:
+    LIBCLANG_PATH={{libclang}} python3 tools/coverage.py units {{coverage_dir}}/units --target {{target}}/coverage-units --servo-dir {{servo}} {{by_design}}
+
+# Build `mozjs/tests` against the crates.io mozjs of the same version (SpiderMonkey) and run each test alone.
+coverage-sm:
+    python3 tools/coverage.py sm {{coverage_dir}}/sm --target {{target}}/coverage-sm --servo-dir {{servo}}
+
+# The same, with SpiderMonkey built from source and instrumented by the clang of rustc's LLVM version.
+coverage-spidermonkey:
+    python3 tools/coverage.py sm {{coverage_dir}}/spidermonkey --instrument --target {{target}}/coverage-spidermonkey --servo-dir {{servo}}
+
+# Build Servo's servoshell (in `SERVO_DIR`) against the shim, with the shim's code instrumented wherever it is compiled.
+coverage-servo:
+    LIBCLANG_PATH={{libclang}} python3 tools/coverage.py servo quickjs --target {{coverage_servo_target}} --servo-dir {{servo}} --profile {{coverage_servo_profile}}
+
+# Build servoshell on SpiderMonkey, built from source, with SpiderMonkey and the crates that link it instrumented.
+coverage-servo-sm:
+    python3 tools/coverage.py servo spidermonkey --target {{coverage_servo_sm_target}} --servo-dir {{servo}} --profile {{coverage_servo_profile}}
+
+# Run WPT tests (all without arguments) with the `coverage-servo` build and export what they reach.
+[positional-arguments]
+coverage-wpt *args:
+    python3 tools/coverage.py wpt quickjs {{coverage_dir}}/wpt --binary {{coverage_servo_target}}/{{coverage_servo_profile_dir}}/servoshell --servo-dir {{servo}} -- "$@"
+
+# The same with the `coverage-servo-sm` build.
+[positional-arguments]
+coverage-wpt-sm *args:
+    python3 tools/coverage.py wpt spidermonkey {{coverage_dir}}/wpt-spidermonkey --binary {{coverage_servo_sm_target}}/{{coverage_servo_profile_dir}}/servoshell --servo-dir {{servo}} -- "$@"
+
+# Report coverage per group, against the WPT reach set if there is one (`--engine`, `--match`, `--gaps`, `--lcov`: docs/coverage.md).
+[positional-arguments]
+coverage-report *args:
+    python3 tools/coverage.py report {{coverage_dir}} "$@"
+
 fuzz_target := absolute_path(env_var_or_default("FUZZ_TARGET_DIR", target + "/fuzz"))
 
 # Fuzz a target (clone_read, eval, strings) under ASan and UBSan, QuickJS's C code included; extra args go to libFuzzer.

@@ -46,7 +46,8 @@ Use `patch.crates-io.mozjs.path="/path/to/servo-quickjs/mozjs"` for a local chec
 - `just test-asan`: the tests under ASan and LSan (nightly);
 - `just fuzz <target>` and `just fuzz-smoke`;
 - `just check-bindings`: fails if the bindings are out of date;
-- `just servo`, `just run <url>` and `just wpt <log> <tests>` with a Servo checkout in `SERVO_DIR`.
+- `just servo`, `just run <url>` and `just wpt <log> <tests>` with a Servo checkout in `SERVO_DIR`;
+- `just coverage`, and `just coverage-servo` and `just coverage-wpt` with a Servo checkout: how much of the shim the tests cover, and how much of that SpiderMonkey agrees with, against what WPT reaches ([docs/coverage.md](docs/coverage.md)).
 
 `QJS_GC_STATS` prints live objects, roots and retaining paths after each GC (see `mozjs/src/engine/runtime.rs`).
 
