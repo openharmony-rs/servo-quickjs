@@ -195,6 +195,27 @@ pub(crate) fn realm_count() -> usize {
     GLOBALS.with(|g| g.borrow().len())
 }
 
+const WEBASSEMBLY_SOURCE: &str = concat!(include_str!("webassembly.js"), "\0");
+
+/// QuickJS has no WebAssembly. Define the namespace anyway: a bare reference to
+/// `WebAssembly.Module` (and `typeof WebAssembly`) must not throw a ReferenceError, and
+/// compiling has to fail with a `CompileError` rather than hang. See `webassembly.js`.
+unsafe fn install_webassembly(qctx: *mut q::JSContext) {
+    let src = WEBASSEMBLY_SOURCE.as_bytes();
+    let value = q::JS_Eval(
+        qctx,
+        src.as_ptr() as *const std::os::raw::c_char,
+        src.len() - 1,
+        c"<webassembly>".as_ptr(),
+        q::JS_EVAL_TYPE_GLOBAL as i32,
+    );
+    if q::JS_IsException(value) != 0 {
+        let exception = q::JS_GetException(qctx);
+        q::JS_FreeValue(qctx, exception);
+    }
+    q::JS_FreeValue(qctx, value);
+}
+
 pub(crate) unsafe fn JS_NewGlobalObject(
     cx: *mut root::JSContext,
     clasp: *const root::JSClass,
@@ -209,6 +230,7 @@ pub(crate) unsafe fn JS_NewGlobalObject(
         return ptr::null_mut();
     }
     super::intl::install_intl(qctx);
+    install_webassembly(qctx);
     let class_id = super::class::class_id(cx.rt, clasp);
     assert_eq!(
         q::JS_SetGlobalObjectClass(qctx, class_id),
