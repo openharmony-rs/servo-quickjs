@@ -6241,6 +6241,7 @@ JSValue JS_NewCFunction2(JSContext *ctx, JSCFunction *func,
 
 typedef struct JSCFunctionDataRecord {
     JSCFunctionData *func;
+    JSContext *realm; /* Servo (patch Q53): the realm that created the function */
     uint8_t length;
     uint8_t data_len;
     uint16_t magic;
@@ -6256,6 +6257,8 @@ static void js_c_function_data_finalizer(JSRuntime *rt, JSValue val)
         for(i = 0; i < s->data_len; i++) {
             JS_FreeValueRT(rt, s->data[i]);
         }
+        if (s->realm)
+            JS_FreeContext(s->realm);
         js_free_rt(rt, s);
     }
 }
@@ -6270,6 +6273,8 @@ static void js_c_function_data_mark(JSRuntime *rt, JSValueConst val,
         for(i = 0; i < s->data_len; i++) {
             JS_MarkValue(rt, s->data[i], mark_func);
         }
+        if (s->realm)
+            mark_func(rt, &s->realm->header);
     }
 }
 
@@ -6313,6 +6318,7 @@ JSValue JS_NewCFunctionData(JSContext *ctx, JSCFunctionData *func,
         return JS_EXCEPTION;
     }
     s->func = func;
+    s->realm = JS_DupContext(ctx); /* Servo (patch Q53) */
     s->length = length;
     s->data_len = data_len;
     s->magic = magic;
@@ -21661,6 +21667,23 @@ JSContext *JS_GetFunctionRealm(JSContext *ctx, JSValueConst func_obj)
         realm = js_promise_function_realm(p);
         if (!realm)
             realm = ctx;
+        break;
+    case JS_CLASS_ASYNC_FUNCTION_RESOLVE: /* Servo (patch Q53): an await continuation */
+    case JS_CLASS_ASYNC_FUNCTION_REJECT:  /* Servo (patch Q53): runs in its function's realm */
+        {
+            JSAsyncFunctionState *s = p->u.async_function_data;
+            if (s && !s->is_completed &&
+                JS_VALUE_GET_TAG(s->frame.cur_func) == JS_TAG_OBJECT)
+                realm = JS_GetFunctionRealm(ctx, s->frame.cur_func);
+            else
+                realm = ctx;
+        }
+        break;
+    case JS_CLASS_C_FUNCTION_DATA: /* Servo (patch Q53): a reaction created by a realm */
+        {
+            JSCFunctionDataRecord *s = p->u.c_function_data_record;
+            realm = s && s->realm ? s->realm : ctx;
+        }
         break;
     default:
         realm = ctx;
