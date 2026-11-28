@@ -1,0 +1,41 @@
+# This suite is its own workspace on purpose. servo-quickjs has a `mozjs` member, and a path
+# dependency from inside that workspace could resolve to the QuickJS shim by accident. As a
+# separate workspace, `cargo test` here builds the registry SpiderMonkey crate unless the caller
+# passes an explicit `--config patch.crates-io.mozjs.path=...` for a QuickJS run.
+[workspace]
+resolver = "2"
+
+[workspace.package]
+version = "0.8.0"
+authors = ["The Servo Project Developers"]
+license = "MPL-2.0"
+edition = "2024"
+rust-version = "1.88.0"
+publish = false
+
+[package]
+name = "engine_contract_tests"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "engine_contract_tests"
+path = "lib.rs"
+
+[features]
+# Select the QuickJS shim for the shared contract suite. The tests still treat SpiderMonkey
+# semantics as the contract; this feature only lets them record a shim divergence.
+js-quickjs = []
+
+[workspace.dependencies]
+serde_json = "1.0"
+
+[dependencies]
+# `jit` is what makes `mozjs_sys` use its prebuilt SpiderMonkey archive instead of compiling
+# the engine from source; it is also how the published archive was built.
+js = { package = "mozjs", version = "=0.26.14", default-features = false, features = ["intl", "jit", "libz-sys"] }
+serde_json = { workspace = true }

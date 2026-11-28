@@ -18,8 +18,33 @@ Status: experimental. Servo runs on it with its `js-quickjs` feature, which is n
 - `mozjs`: the `mozjs` 0.26.14 API on QuickJS. Its version must equal the `mozjs` version Servo pins.
 - `gen-bindings`: regenerates the bindings of `servo-quickjs` (`just gen-bindings`).
 - `fuzz`: cargo-fuzz targets.
+- `engine-contract`: the shared `mozjs` contract suite. SpiderMonkey is the reference, and the
+  same cases run against the shim to record differences.
 
 [docs/design.md](docs/design.md) describes how SpiderMonkey's API maps onto QuickJS, and lists the QuickJS patches.
+
+## Engine contract tests
+
+`engine-contract/` holds the contract cases for the `mozjs` API, its API snapshot, the difference
+allowlist and the fix records. It is a separate Cargo workspace on purpose: joining this one would
+let a path dependency resolve to the shim by accident, and a "QuickJS" run would build QuickJS
+against itself.
+
+```sh
+cd engine-contract
+tools/run.sh run-spidermonkey-contract   # reference run, registry mozjs
+tools/run.sh run-quickjs-contract        # this checkout's shim
+tools/run.sh compare-engine-results
+```
+
+The coverage scope is still Servo's: `scan-mozjs-surface` reads a Servo checkout from `SERVO_DIR`
+(default: a sibling `../servo-ohos`; there is deliberately no `../servo` fallback) and regenerates
+`servo-mozjs-api-usage.toml`.
+`SERVO_DIR` also accepts a clone URL, which the suite sparse-clones at `SERVO_REF` into
+`SERVO_CACHE`; the Servo checkout is read-only input, so it needs no test changes of its own.
+A shim change that resolves a diff needs a record in `quickjs-shim-fix-records.md`;
+`run-contract-gate` checks that along with the engine comparison and case coverage. See
+[engine-contract/README.md](engine-contract/README.md).
 
 ## Building Servo with it
 

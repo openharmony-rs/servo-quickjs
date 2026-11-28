@@ -1,0 +1,8 @@
+# These cases came from Servo, whose `test-tidy` formats them as
+#   cargo fmt -- --config unstable_features=true --config binop_separator=Back \
+#     --config imports_granularity=Module --config group_imports=StdExternalCrate --check
+# The stable subset below is what keeps this workspace's files identical to that tidy result;
+# `tools/run.sh check-rustfmt` runs the full command.
+match_block_trailing_comma = true
+reorder_imports = true
+style_edition = "2024"

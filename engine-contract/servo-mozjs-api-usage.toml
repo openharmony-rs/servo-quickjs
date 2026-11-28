@@ -1,0 +1,3740 @@
+# The mozjs surface Servo actually uses.
+#
+# This file is the coverage standard for the engine contract suite. Entries outside it are
+# not required to have a contract case. Regenerate with:
+#   SERVO_DIR=/path/to/servo engine-contract/tools/run.sh scan-mozjs-surface
+
+[scope]
+owner = "servo"
+description = "mozjs entries Servo calls directly or reaches through wrappers"
+entries = 428
+
+[[entry]]
+name = "AddAssociatedMemory"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/reflector.rs:191",
+  "components/script_bindings/reflector.rs:240",
+  "components/script_bindings/reflector.rs:259",
+]
+
+[[entry]]
+name = "AddPromiseReactions"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/promise/promise.rs:399",
+  "components/script/scripting/module_loading.rs:225",
+]
+
+[[entry]]
+name = "AddRawValueRoot"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/permanent_root.rs:36",
+]
+
+[[entry]]
+name = "AppendToEnvironmentChain"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script/dom/event/eventtarget.rs:748,751,753,755 -> mozjs rust.rs:1263",
+]
+
+[[entry]]
+name = "AppendToIdVector"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:1661",
+  "components/script/dom/window/windowproxy.rs:1705",
+  "components/script/window_named_properties.rs:166",
+  "components/script_bindings/observablearray.rs:599",
+  "components/script_bindings/proxyhandler.rs:1031",
+  "components/script_bindings/proxyhandler.rs:1046",
+  "components/script_bindings/proxyhandler.rs:1112",
+  "components/script_bindings/proxyhandler.rs:319",
+  "components/script_bindings/proxyhandler.rs:501",
+  "components/script_bindings/proxyhandler.rs:505",
+  "components/script_bindings/utils.rs:791",
+]
+
+[[entry]]
+name = "ArrayBufferClone"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:434",
+  "components/script_bindings/buffer_source.rs:437",
+]
+
+[[entry]]
+name = "ArrayBufferCopyData"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:675",
+]
+
+[[entry]]
+name = "AssertSameCompartment"
+status = "empty"
+mode = "indirect"
+provenance = [
+  "from_jsval",
+]
+
+[[entry]]
+name = "AtomToLinearString"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:166",
+]
+
+[[entry]]
+name = "BuildStackString"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script/dom/bindings/error.rs:65; components/script/dom/webgl/webglrenderingcontext.rs:2245 -> mozjs rust.rs:1185",
+]
+
+[[entry]]
+name = "Call"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/worklet/paintworkletglobalscope.rs:338",
+  "components/script_bindings/proxyhandler.rs:841",
+  "components/script_bindings/proxyhandler.rs:899",
+  "get",
+]
+
+[[entry]]
+name = "CallBigIntTracer"
+status = "empty"
+mode = "indirect"
+provenance = [
+  "trace",
+]
+
+[[entry]]
+name = "CallFunctionTracer"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "trace",
+]
+
+[[entry]]
+name = "CallIdTracer"
+status = "empty"
+mode = "indirect"
+provenance = [
+  "trace",
+]
+
+[[entry]]
+name = "CallJitGetterOp"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "reviewed: components/script_bindings/utils.rs:640",
+]
+
+[[entry]]
+name = "CallJitMethodOp"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "reviewed: components/script_bindings/utils.rs:617",
+]
+
+[[entry]]
+name = "CallJitSetterOp"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:653",
+]
+
+[[entry]]
+name = "CallObjectRootTracer"
+status = "empty"
+mode = "indirect"
+provenance = [
+  "trace",
+]
+
+[[entry]]
+name = "CallObjectTracer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/trace.rs:67",
+  "trace",
+]
+
+[[entry]]
+name = "CallOriginalPromiseReject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:719",
+]
+
+[[entry]]
+name = "CallOriginalPromiseResolve"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "reviewed: components/script/dom/promise/promise.rs:292",
+]
+
+[[entry]]
+name = "CallPropertyDescriptorTracer"
+status = "empty"
+mode = "indirect"
+provenance = [
+  "trace",
+]
+
+[[entry]]
+name = "CallScriptTracer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/trace.rs:231",
+  "trace",
+]
+
+[[entry]]
+name = "CallStringTracer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/trace.rs:261",
+  "trace",
+]
+
+[[entry]]
+name = "CallSymbolTracer"
+status = "empty"
+mode = "indirect"
+provenance = [
+  "trace",
+]
+
+[[entry]]
+name = "CallValueRootTracer"
+status = "empty"
+mode = "indirect"
+provenance = [
+  "trace",
+]
+
+[[entry]]
+name = "CallValueTracer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/trace.rs:248",
+  "trace",
+]
+
+[[entry]]
+name = "CaptureCurrentStack"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "new",
+]
+
+[[entry]]
+name = "CheckRegExpSyntax"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/html/form_controls/htmlinputelement.rs:2772",
+]
+
+[[entry]]
+name = "CheckedUnwrapStatic"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:664",
+]
+
+[[entry]]
+name = "ClearKeptObjects"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:321",
+]
+
+[[entry]]
+name = "CollectServoSizes"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:1130",
+]
+
+[[entry]]
+name = "Compile1"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/globalscope/globalscope.rs:2631",
+  "components/script/scripting/script_execution.rs:202",
+]
+
+[[entry]]
+name = "CompileFunction"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/event/eventtarget.rs:759",
+]
+
+[[entry]]
+name = "CompileGlobalScriptToStencil_C"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "compile_to_stencil_offthread",
+]
+
+[[entry]]
+name = "CompileJsonModule1"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_module.rs:292",
+]
+
+[[entry]]
+name = "CompileModule1"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_module.rs:231",
+]
+
+[[entry]]
+name = "Construct"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "Construct1",
+]
+
+[[entry]]
+name = "Construct1"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/node/customelementregistry.rs:1175",
+  "components/script/dom/node/customelementregistry.rs:961",
+  "components/script/dom/worklet/paintworkletglobalscope.rs:219",
+]
+
+[[entry]]
+name = "ContextOptionsRef"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:722",
+]
+
+[[entry]]
+name = "ConvertFrontendErrorsToRuntimeErrors"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_execution.rs:135",
+]
+
+[[entry]]
+name = "CopyJSStructuredCloneData"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/structuredclone.rs:687",
+]
+
+[[entry]]
+name = "CreateDefaultExportSyntheticModule"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_module.rs:349",
+  "components/script/scripting/script_module.rs:370",
+]
+
+[[entry]]
+name = "CreateForwardingProxyHandler"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/observablearray.rs:93",
+]
+
+[[entry]]
+name = "CreateJobQueue"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:67",
+]
+
+[[entry]]
+name = "CreateProxyHandler"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/window_named_properties.rs:75",
+]
+
+[[entry]]
+name = "CreateRootedIdVector"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "new",
+]
+
+[[entry]]
+name = "CreateRootedObjectVector"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "new",
+]
+
+[[entry]]
+name = "CreateRustJSPrincipals"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/principals.rs:29",
+]
+
+[[entry]]
+name = "CreateWrapperProxyHandler"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:1790",
+]
+
+[[entry]]
+name = "CurrentGlobal"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script AutoRealm/CurrentRealm -> mozjs realm.rs:255",
+]
+
+[[entry]]
+name = "CurrentGlobalOrNull"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/globalscope/globalscope.rs:2826",
+]
+
+[[entry]]
+name = "DateGetMsecSinceEpoch"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/html/form_controls/htmlinputelement.rs:1371",
+  "components/script/dom/indexeddb/key.rs:273",
+]
+
+[[entry]]
+name = "DefineFunctionWithReserved"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_module.rs:780",
+]
+
+[[entry]]
+name = "DeleteCompileOptions"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "drop",
+]
+
+[[entry]]
+name = "DeleteEnvironmentChain"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "drop",
+]
+
+[[entry]]
+name = "DeleteJSAutoStructuredCloneBuffer"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "drop",
+]
+
+[[entry]]
+name = "DeleteJobQueue"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:80",
+]
+
+[[entry]]
+name = "DeleteOwningCompileOptions"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "drop",
+]
+
+[[entry]]
+name = "DeleteRealmOptions"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "drop",
+]
+
+[[entry]]
+name = "DeleteRootedObjectVector"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "drop",
+]
+
+[[entry]]
+name = "DeleteWrapperProxyHandler"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:1826",
+]
+
+[[entry]]
+name = "DequeueNextRegularMicroTask"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "JS_DequeueNextMicroTask",
+]
+
+[[entry]]
+name = "DescribeScriptedCaller"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "describe_scripted_caller",
+]
+
+[[entry]]
+name = "DestroyFrontendContext"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "drop",
+]
+
+[[entry]]
+name = "DestroyRootedIdVector"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "drop",
+]
+
+[[entry]]
+name = "DestroyRustJSPrincipals"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "JS_DropPrincipals",
+  "components/script/dom/bindings/principals.rs:21",
+]
+
+[[entry]]
+name = "DetachArrayBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:304",
+  "components/script_bindings/buffer_source.rs:308",
+]
+
+[[entry]]
+name = "DisableJitBackend"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/engine/init.rs:168",
+]
+
+[[entry]]
+name = "DispatchableRun"
+status = "todo"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:1408",
+]
+
+[[entry]]
+name = "DumpJSStack"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/window.rs:4605",
+]
+
+[[entry]]
+name = "EnqueueMicroTask"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:201",
+]
+
+[[entry]]
+name = "EnterRealm"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/callback.rs:371",
+  "new",
+]
+
+[[entry]]
+name = "ExecuteRegExpNoStatics"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/html/form_controls/htmlinputelement.rs:2822",
+]
+
+[[entry]]
+name = "FinishLoadingDynamicImportedModule"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/module_loading.rs:247",
+]
+
+[[entry]]
+name = "FinishLoadingImportedModule"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/module_loading.rs:254",
+]
+
+[[entry]]
+name = "FinishLoadingImportedModuleFailed"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "FinishLoadingImportedModuleFailedWithPendingException",
+  "components/script/scripting/module_loading.rs:518",
+  "components/script/scripting/module_loading.rs:537",
+  "host_load_imported_module",
+]
+
+[[entry]]
+name = "FinishLoadingImportedModuleFailedWithPendingException"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/module_loading.rs:441",
+  "components/script/scripting/module_loading.rs:461",
+  "components/script/scripting/module_loading.rs:507",
+  "host_load_imported_module",
+]
+
+[[entry]]
+name = "GCTraceKindToAscii"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/trace.rs:234",
+  "components/script/dom/bindings/trace.rs:251",
+  "components/script/dom/bindings/trace.rs:264",
+  "components/script_bindings/trace.rs:70",
+]
+
+[[entry]]
+name = "GetArrayBufferByteLength"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:351",
+  "components/script_bindings/buffer_source.rs:355",
+  "components/script_bindings/buffer_source.rs:366",
+]
+
+[[entry]]
+name = "GetArrayBufferLengthAndData"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script_bindings/buffer_source.rs -> TypedArray<ArrayBufferU8>::length_and_data",
+]
+
+[[entry]]
+name = "GetArrayBufferViewLengthAndData"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script_bindings/buffer_source.rs -> TypedArray<ArrayBufferViewU8>::length_and_data",
+]
+
+[[entry]]
+name = "GetArrayLength"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:484",
+  "components/script/dom/indexeddb/key.rs:328",
+  "components/script_bindings/observablearray.rs:249",
+  "components/script_bindings/observablearray.rs:259",
+  "components/script_bindings/observablearray.rs:308",
+  "components/script_bindings/observablearray.rs:430",
+  "components/script_bindings/observablearray.rs:481",
+  "components/script_bindings/observablearray.rs:523",
+]
+
+[[entry]]
+name = "GetBuiltinClass"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:387",
+  "components/script/dom/console.rs:588",
+]
+
+[[entry]]
+name = "GetCurrentRealmOrNull"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "assert",
+  "get_context_realm",
+]
+
+[[entry]]
+name = "GetExecutionGlobalFromJSMicroTask"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:260",
+]
+
+[[entry]]
+name = "GetFloat32ArrayLengthAndData"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script_bindings/buffer_source.rs -> TypedArray<Float32>::length_and_data",
+]
+
+[[entry]]
+name = "GetFloat64ArrayLengthAndData"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script_bindings/buffer_source.rs -> TypedArray<Float64>::length_and_data",
+]
+
+[[entry]]
+name = "GetFunctionNativeReserved"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/promise/promise.rs:454",
+  "components/script/dom/promise/promise.rs:463",
+  "components/script/scripting/module_loading.rs:83",
+  "components/script/scripting/script_module.rs:816",
+]
+
+[[entry]]
+name = "GetFunctionRealm"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:705",
+]
+
+[[entry]]
+name = "GetIdVectorAddress"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "handle_mut",
+]
+
+[[entry]]
+name = "GetInt32ArrayLengthAndData"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script_bindings/buffer_source.rs -> TypedArray<Int32>::length_and_data",
+]
+
+[[entry]]
+name = "GetJobQueue"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:211",
+]
+
+[[entry]]
+name = "GetLengthOfJSStructuredCloneData"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/structuredclone.rs:685",
+]
+
+[[entry]]
+name = "GetLinearStringCharAt"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:171",
+]
+
+[[entry]]
+name = "GetLinearStringLength"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:167",
+]
+
+[[entry]]
+name = "GetModuleLoadHook"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_module.rs:662",
+]
+
+[[entry]]
+name = "GetModuleNamespace"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/module_loading.rs:334",
+]
+
+[[entry]]
+name = "GetModuleRequestSpecifier"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_module.rs:721",
+]
+
+[[entry]]
+name = "GetModuleRequestType"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/module_loading.rs:429",
+]
+
+[[entry]]
+name = "GetModuleScript"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "inner_module_loading",
+]
+
+[[entry]]
+name = "GetNonCCWObjectGlobal"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/globalscope/globalscope.rs:2018",
+  "components/script/runtime/script_runtime.rs:1088",
+  "components/script_bindings/interface.rs:673",
+  "components/script_bindings/utils.rs:535",
+]
+
+[[entry]]
+name = "GetObjectProto"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:367",
+]
+
+[[entry]]
+name = "GetObjectRealmOrNull"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/window.rs:3562",
+  "components/script_bindings/proxyhandler.rs:1136",
+  "get_object_realm",
+]
+
+[[entry]]
+name = "GetObjectVectorAddress"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "handle",
+]
+
+[[entry]]
+name = "GetPromiseIsHandled"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/promise/promise.rs:412",
+]
+
+[[entry]]
+name = "GetPromiseState"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/promise/promise.rs:355",
+  "components/script/dom/promise/promise.rs:361",
+  "components/script/dom/promise/promise.rs:367",
+]
+
+[[entry]]
+name = "GetPromiseUserInputEventHandlingState"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:277",
+]
+
+[[entry]]
+name = "GetPropertyKeys"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/js.rs:150",
+  "components/script_bindings/observablearray.rs:605",
+]
+
+[[entry]]
+name = "GetProxyHandlerExtra"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/conversions.rs:221",
+  "components/script_bindings/observablearray.rs:190",
+]
+
+[[entry]]
+name = "GetProxyHandlerFamily"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "SetDOMProxyInformation",
+  "components/script_bindings/proxyhandler.rs:101",
+]
+
+[[entry]]
+name = "GetProxyPrivate"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:1195",
+  "components/script_bindings/observablearray.rs:200",
+  "components/script_bindings/proxyhandler.rs:225",
+]
+
+[[entry]]
+name = "GetProxyReservedSlot"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:1836",
+  "components/script/dom/window/windowproxy.rs:1855",
+  "components/script_bindings/conversions.rs:260",
+  "components/script_bindings/conversions.rs:577",
+  "components/script_bindings/observablearray.rs:143",
+  "components/script_bindings/observablearray.rs:212",
+  "components/script_bindings/proxyhandler.rs:530",
+]
+
+[[entry]]
+name = "GetRealmErrorPrototype"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/constructor.rs:180",
+]
+
+[[entry]]
+name = "GetRealmFunctionPrototype"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script_bindings/codegen/codegen.py:4001; generated Bindings",
+]
+
+[[entry]]
+name = "GetRealmGlobalOrNull"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:712",
+]
+
+[[entry]]
+name = "GetRealmIteratorPrototype"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/constructor.rs:183",
+]
+
+[[entry]]
+name = "GetRealmKeyObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:581",
+]
+
+[[entry]]
+name = "GetRealmObjectPrototype"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/constructor.rs:123",
+  "components/script_bindings/constructor.rs:186",
+]
+
+[[entry]]
+name = "GetRealmPrincipals"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:1144",
+  "components/script_bindings/proxyhandler.rs:1146",
+]
+
+[[entry]]
+name = "GetRustJSPrincipalsPrivate"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/principals.rs:20",
+  "components/script_bindings/principals.rs:53",
+]
+
+[[entry]]
+name = "GetSavedFrameColumn"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:1408",
+]
+
+[[entry]]
+name = "GetSavedFrameFunctionDisplayName"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:1363",
+]
+
+[[entry]]
+name = "GetSavedFrameLine"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:1397",
+]
+
+[[entry]]
+name = "GetSavedFrameParent"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script/dom/console.rs:1358 -> mozjs rust.rs:1220",
+]
+
+[[entry]]
+name = "GetSavedFrameSource"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:1380",
+]
+
+[[entry]]
+name = "GetScriptedCallerGlobal"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/settings_stack.rs:69",
+]
+
+[[entry]]
+name = "GetStaticPrototype"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/window_named_properties.rs:207",
+  "components/script_bindings/proxyhandler.rs:216",
+]
+
+[[entry]]
+name = "GetUint32ArrayLengthAndData"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script_bindings/buffer_source.rs -> TypedArray<Uint32>::length_and_data",
+]
+
+[[entry]]
+name = "GetUint8ArrayLengthAndData"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script_bindings/buffer_source.rs -> TypedArray<Uint8>::length_and_data",
+]
+
+[[entry]]
+name = "GetUint8ClampedArrayLengthAndData"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script_bindings/buffer_source.rs -> TypedArray<ClampedU8>::length_and_data",
+]
+
+[[entry]]
+name = "GetWeakMapEntry"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:597",
+]
+
+[[entry]]
+name = "GetWellKnownSymbol"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/window_named_properties.rs:165",
+  "components/script/window_named_properties.rs:92",
+  "components/script_bindings/interface.rs:282",
+  "components/script_bindings/proxyhandler.rs:482",
+  "components/script_bindings/proxyhandler.rs:504",
+]
+
+[[entry]]
+name = "GetWindowProxyClass"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/event_loop/script_thread.rs:864",
+]
+
+[[entry]]
+name = "HadFrontendErrors"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_execution.rs:132",
+]
+
+[[entry]]
+name = "HasAnyMicroTasks"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:234",
+  "components/script/runtime/job_queue.rs:244",
+  "components/script/runtime/job_queue.rs:333",
+]
+
+[[entry]]
+name = "HasDefinedArrayBufferDetachKey"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:704",
+]
+
+[[entry]]
+name = "HeapBigIntWriteBarriers"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "post_barrier",
+]
+
+[[entry]]
+name = "HeapObjectWriteBarriers"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "post_barrier",
+]
+
+[[entry]]
+name = "HeapScriptWriteBarriers"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "post_barrier",
+]
+
+[[entry]]
+name = "HeapStringWriteBarriers"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "post_barrier",
+]
+
+[[entry]]
+name = "HeapValueWriteBarriers"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "post_barrier",
+]
+
+[[entry]]
+name = "HideScriptedCaller"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/settings_stack.rs:77",
+]
+
+[[entry]]
+name = "InitConsumeStreamCallback"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:695",
+]
+
+[[entry]]
+name = "InitSelfHostedCode"
+status = "empty"
+mode = "indirect"
+provenance = [
+  "create",
+]
+
+[[entry]]
+name = "InitializeMemoryReporter"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/engine/init.rs:179",
+]
+
+[[entry]]
+name = "InstantiateGlobalStencil"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_execution.rs:120",
+]
+
+[[entry]]
+name = "IsArgumentsObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/event_loop/webdriver_handlers.rs:370",
+]
+
+[[entry]]
+name = "IsArrayBufferObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/indexeddb/key.rs:285",
+  "components/script/dom/indexeddb/key.rs:286",
+  "components/script/dom/indexeddb/key.rs:307",
+  "components/script_bindings/buffer_source.rs:210",
+  "components/script_bindings/buffer_source.rs:415",
+]
+
+[[entry]]
+name = "IsArrayObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/indexeddb/key.rs:322",
+  "components/script/dom/indexeddb/key.rs:513",
+  "components/script_bindings/conversions.rs:528",
+]
+
+[[entry]]
+name = "IsCallable"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/node/customelementregistry.rs:356",
+  "components/script/dom/worklet/paintworkletglobalscope.rs:626",
+  "components/script_bindings/callback.rs:315",
+]
+
+[[entry]]
+name = "IsConstructor"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/node/customelementregistry.rs:403",
+  "components/script/dom/worklet/paintworkletglobalscope.rs:606",
+]
+
+[[entry]]
+name = "IsDetachedArrayBufferObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/indexeddb/key.rs:287",
+  "components/script/dom/indexeddb/key.rs:299",
+  "components/script_bindings/buffer_source.rs:332",
+  "components/script_bindings/buffer_source.rs:336",
+]
+
+[[entry]]
+name = "IsJSMicroTask"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:249",
+  "components/script/runtime/job_queue.rs:335",
+]
+
+[[entry]]
+name = "IsPromiseObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/promise/promise.rs:176",
+  "components/script/dom/promise/promise.rs:230",
+  "components/script/dom/promise/promise.rs:375",
+  "components/script/scripting/module_loading.rs:243",
+]
+
+[[entry]]
+name = "IsProxyHandlerFamily"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/conversions.rs:239",
+]
+
+[[entry]]
+name = "IsSharableCompartment"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:209",
+]
+
+[[entry]]
+name = "IsSystemCompartment"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:209",
+]
+
+[[entry]]
+name = "IsWeakMapObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:553",
+]
+
+[[entry]]
+name = "IsWindowProxy"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "ToWindowIfWindowProxy",
+  "components/script_bindings/conversions.rs:573",
+  "components/script_bindings/proxyhandler.rs:674",
+  "unwrap_one",
+]
+
+[[entry]]
+name = "IsWindowSlow"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "ToWindowProxyIfWindowSlow",
+  "is_window",
+]
+
+[[entry]]
+name = "IsWrapper"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/utils.rs:70",
+  "components/script_bindings/conversions.rs:294",
+  "components/script_bindings/conversions.rs:301",
+]
+
+[[entry]]
+name = "JS_AddExtraGCRootsTracer"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:614",
+  "create",
+]
+
+[[entry]]
+name = "JS_AddInterruptCallback"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/serviceworker/serviceworkerglobalscope.rs:469",
+  "components/script/dom/workers/workerglobalscope.rs:699",
+  "components/script/event_loop/script_thread.rs:865",
+]
+
+[[entry]]
+name = "JS_AlreadyHasOwnPropertyById"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:84",
+]
+
+[[entry]]
+name = "JS_AtomizeAndPinString"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:518",
+  "components/script_bindings/proxyhandler.rs:1038",
+  "components/script_bindings/proxyhandler.rs:316",
+  "components/script_bindings/proxyhandler.rs:498",
+]
+
+[[entry]]
+name = "JS_AtomizeStringN"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:789",
+]
+
+[[entry]]
+name = "JS_CallFunctionName"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/event_loop/webdriver_handlers.rs:468",
+]
+
+[[entry]]
+name = "JS_ClearPendingException"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/error.rs:429",
+  "components/script/dom/console.rs:1093",
+  "components/script/dom/console.rs:786",
+  "components/script/dom/console.rs:800",
+  "components/script/dom/html/form_controls/htmlinputelement.rs:2784",
+  "components/script/dom/html/form_controls/htmlinputelement.rs:2804",
+  "components/script/dom/html/form_controls/htmlinputelement.rs:2836",
+  "components/script/dom/promise/promise.rs:320",
+  "components/script/dom/promise/promise.rs:348",
+  "components/script/dom/worklet/paintworkletglobalscope.rs:225",
+  "components/script/dom/worklet/paintworkletglobalscope.rs:352",
+  "components/script/dom/xmlhttprequest/xmlhttprequest.rs:1544",
+  "components/script/fetch/body.rs:857",
+  "components/script/scripting/script_execution.rs:292",
+  "components/script/scripting/script_execution.rs:304",
+  "components/script/scripting/script_module.rs:109",
+  "components/script_bindings/buffer_source.rs:455",
+  "components/script_bindings/buffer_source.rs:746",
+  "components/script_bindings/buffer_source.rs:990",
+  "components/script_bindings/utils.rs:718",
+]
+
+[[entry]]
+name = "JS_DefineDebuggerObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/debugger/debuggerglobalscope.rs:139",
+]
+
+[[entry]]
+name = "JS_DefineElement"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs conversions.rs:732 ToJSValConvertible for [T]",
+]
+
+[[entry]]
+name = "JS_DefineFunction"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "DefineFunctionWithReserved",
+]
+
+[[entry]]
+name = "JS_DefineFunctions"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:637",
+  "define_methods",
+]
+
+[[entry]]
+name = "JS_DefineProperties"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:630",
+  "define_properties",
+]
+
+[[entry]]
+name = "JS_DefineProperty"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/js.rs:60",
+]
+
+[[entry]]
+name = "JS_DefineProperty3"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:359",
+  "components/script_bindings/interface.rs:456",
+]
+
+[[entry]]
+name = "JS_DefineProperty4"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_module.rs:769",
+  "components/script_bindings/interface.rs:520",
+]
+
+[[entry]]
+name = "JS_DefineProperty5"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:532",
+]
+
+[[entry]]
+name = "JS_DefinePropertyById"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:1356",
+  "components/script_bindings/observablearray.rs:404",
+  "components/script_bindings/proxyhandler.rs:131",
+]
+
+[[entry]]
+name = "JS_DefinePropertyById2"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script_bindings/codegen/codegen.py:4035; generated Bindings",
+]
+
+[[entry]]
+name = "JS_DefinePropertyById5"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:288",
+]
+
+[[entry]]
+name = "JS_DefineUCProperty2"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/record.rs:196",
+]
+
+[[entry]]
+name = "JS_DeletePropertyById"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:1630",
+  "components/script_bindings/observablearray.rs:458",
+  "components/script_bindings/proxyhandler.rs:162",
+  "delete",
+]
+
+[[entry]]
+name = "JS_DeprecatedStringHasLatin1Chars"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/conversions.rs:148",
+  "components/script_bindings/domstring.rs:449",
+  "components/script_bindings/str.rs:225",
+  "components/script_bindings/utils.rs:886",
+  "jsstr_to_string",
+  "latin1_to_string",
+]
+
+[[entry]]
+name = "JS_DequeueNextMicroTask"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:240",
+  "components/script/runtime/job_queue.rs:334",
+]
+
+[[entry]]
+name = "JS_DestroyContext"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "drop",
+]
+
+[[entry]]
+name = "JS_DropPrincipals"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "SetRealmPrincipals",
+  "components/script_bindings/principals.rs:80",
+  "forget_leaked_realms",
+]
+
+[[entry]]
+name = "JS_EncodeStringToLatin1"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: engine/string.rs:635 JS_EncodeStringToASCII -> :639 JS_EncodeStringToLatin1",
+]
+
+[[entry]]
+name = "JS_ErrorFromException"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/error.rs:259",
+]
+
+[[entry]]
+name = "JS_ExecuteScript"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/globalscope/globalscope.rs:2644",
+  "components/script/scripting/script_execution.rs:274",
+]
+
+[[entry]]
+name = "JS_FireOnNewGlobalObject"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:195",
+]
+
+[[entry]]
+name = "JS_ForOfIteratorInit"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "init",
+]
+
+[[entry]]
+name = "JS_ForOfIteratorNext"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "next",
+]
+
+[[entry]]
+name = "JS_ForOfIteratorValueIsIterable"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "is_iterable",
+]
+
+[[entry]]
+name = "JS_ForwardGetPropertyTo"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:1486",
+  "components/script_bindings/observablearray.rs:500",
+  "components/script_bindings/utils.rs:149",
+  "get",
+]
+
+[[entry]]
+name = "JS_ForwardSetPropertyTo"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:1533",
+  "components/script_bindings/observablearray.rs:665",
+  "set",
+]
+
+[[entry]]
+name = "JS_FreezeObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:904",
+]
+
+[[entry]]
+name = "JS_GC"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/testing/testutils.rs:35",
+  "components/script/dom/window/window.rs:1115",
+  "components/script/dom/worklet/worklet.rs:697",
+  "components/script/event_loop/script_thread.rs:2021",
+]
+
+[[entry]]
+name = "JS_GetArrayBufferViewBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/indexeddb/key.rs:293",
+  "components/script_bindings/buffer_source.rs:278",
+  "components/script_bindings/buffer_source.rs:300",
+  "components/script_bindings/buffer_source.rs:330",
+  "components/script_bindings/buffer_source.rs:349",
+  "components/script_bindings/buffer_source.rs:431",
+]
+
+[[entry]]
+name = "JS_GetArrayBufferViewByteLength"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:363",
+]
+
+[[entry]]
+name = "JS_GetArrayBufferViewByteOffset"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:374",
+]
+
+[[entry]]
+name = "JS_GetArrayBufferViewType"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:406",
+]
+
+[[entry]]
+name = "JS_GetElement"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:349",
+  "components/script/dom/console.rs:350",
+  "components/script_bindings/observablearray.rs:272",
+  "components/script_bindings/observablearray.rs:439",
+  "components/script_bindings/observablearray.rs:495",
+  "components/script_bindings/observablearray.rs:540",
+]
+
+[[entry]]
+name = "JS_GetEmptyString"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: engine/string.rs:433 JS_GetEmptyStringValue -> :434 JS_GetEmptyString",
+]
+
+[[entry]]
+name = "JS_GetFunctionArity"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:506",
+]
+
+[[entry]]
+name = "JS_GetFunctionDisplayId"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:505",
+]
+
+[[entry]]
+name = "JS_GetFunctionId"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:504",
+]
+
+[[entry]]
+name = "JS_GetFunctionObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/function.rs:58",
+  "components/script/dom/event/eventtarget.rs:781",
+  "components/script/dom/promise/promise.rs:256",
+  "components/script/dom/promise/promise.rs:492",
+  "components/script/scripting/module_loading.rs:203",
+  "components/script/scripting/module_loading.rs:210",
+  "components/script/scripting/script_module.rs:793",
+  "components/script_bindings/interface.rs:356",
+]
+
+[[entry]]
+name = "JS_GetGCParameter"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/dom/worklet/worklet.rs:686",
+]
+
+[[entry]]
+name = "JS_GetGlobalFromScript"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/module_loading.rs:409",
+]
+
+[[entry]]
+name = "JS_GetLatin1StringCharsAndLength"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/conversions.rs:151",
+  "components/script_bindings/domstring.rs:57",
+  "components/script_bindings/utils.rs:890",
+  "latin1_to_string",
+]
+
+[[entry]]
+name = "JS_GetModulePrivate"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_module.rs:754",
+  "components/script/scripting/script_module.rs:820",
+]
+
+[[entry]]
+name = "JS_GetOwnPropertyDescriptorById"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/js.rs:163",
+  "components/script_bindings/observablearray.rs:549",
+  "get_own_property_descriptor",
+]
+
+[[entry]]
+name = "JS_GetPendingException"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/error.rs:428",
+  "components/script/dom/stream/readablestreamdefaultcontroller.rs:654",
+  "components/script/dom/stream/readablestreamdefaultcontroller.rs:687",
+  "components/script/fetch/body.rs:856",
+  "components/script/scripting/script_module.rs:108",
+  "components/script_bindings/buffer_source.rs:454",
+  "components/script_bindings/buffer_source.rs:745",
+  "components/script_bindings/buffer_source.rs:989",
+  "components/script_bindings/utils.rs:715",
+]
+
+[[entry]]
+name = "JS_GetPromiseResult"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:309",
+  "components/script/runtime/script_runtime.rs:500",
+]
+
+[[entry]]
+name = "JS_GetProperty"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/js.rs:131",
+]
+
+[[entry]]
+name = "JS_GetPropertyById"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/animations/keyframeeffect.rs:437",
+  "components/script_bindings/js.rs:97",
+]
+
+[[entry]]
+name = "JS_GetPropertyDescriptorById"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script_bindings/codegen/codegen.py:6821; generated Bindings",
+]
+
+[[entry]]
+name = "JS_GetPrototype"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "GetObjectProto",
+  "components/script_bindings/js.rs:138",
+  "get_prototype",
+]
+
+[[entry]]
+name = "JS_GetReservedSlot"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/conversions.rs:257",
+  "components/script_bindings/observablearray.rs:145",
+  "components/script_bindings/utils.rs:115",
+  "components/script_bindings/wrap.rs:137",
+]
+
+[[entry]]
+name = "JS_GetRuntime"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "rt",
+]
+
+[[entry]]
+name = "JS_GetScriptPrivate"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/module_loading.rs:402",
+  "components/script/scripting/script_execution.rs:453",
+]
+
+[[entry]]
+name = "JS_GetScriptedCallerPrivate"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/event_loop/timers.rs:1127",
+]
+
+[[entry]]
+name = "JS_GetStringLength"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/indexeddb/key.rs:504",
+]
+
+[[entry]]
+name = "JS_GetTwoByteStringCharsAndLength"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/conversions.rs:161",
+  "components/script_bindings/str.rs:280",
+  "jsstr_to_string",
+]
+
+[[entry]]
+name = "JS_GetTypedArrayLength"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:385",
+]
+
+[[entry]]
+name = "JS_GetTypedArraySharedness"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script/dom/audio/audiobuffer.rs:296,339; components/script/dom/stream/readablestreamdefaultreader.rs:166 -> mozjs typedarray.rs:267",
+]
+
+[[entry]]
+name = "JS_GlobalObjectTraceHook"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script_bindings/codegen/codegen.py:2738; generated trace_hook",
+]
+
+[[entry]]
+name = "JS_HasOwnProperty"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/event_loop/webdriver_handlers.rs:350",
+  "components/script_bindings/utils.rs:324",
+]
+
+[[entry]]
+name = "JS_HasOwnPropertyById"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "JS_AlreadyHasOwnPropertyById",
+  "components/script/dom/indexeddb/key.rs:345",
+  "components/script/dom/window/windowproxy.rs:1422",
+  "has_own",
+]
+
+[[entry]]
+name = "JS_HasProperty"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:247",
+]
+
+[[entry]]
+name = "JS_HasPropertyById"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:1419",
+  "components/script_bindings/observablearray.rs:579",
+  "components/script_bindings/utils.rs:141",
+  "components/script_bindings/utils.rs:347",
+  "has",
+]
+
+[[entry]]
+name = "JS_HoldPrincipals"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "JS_NewGlobalObject",
+  "SetRealmPrincipals",
+  "components/script_bindings/principals.rs:46",
+]
+
+[[entry]]
+name = "JS_IdToValue"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/js.rs:85",
+]
+
+[[entry]]
+name = "JS_IndexToId"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/indexeddb/key.rs:340",
+]
+
+[[entry]]
+name = "JS_Init"
+status = "empty"
+mode = "indirect"
+provenance = [
+  "init",
+]
+
+[[entry]]
+name = "JS_InitDestroyPrincipalsCallback"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:622",
+]
+
+[[entry]]
+name = "JS_InitReadPrincipalsCallback"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:623",
+]
+
+[[entry]]
+name = "JS_InitializePropertiesFromCompatibleNativeObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "reviewed: components/script_bindings/wrap.rs:134",
+]
+
+[[entry]]
+name = "JS_IsArrayBufferViewObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/indexeddb/key.rs:285",
+  "components/script_bindings/buffer_source.rs:213",
+  "components/script_bindings/buffer_source.rs:298",
+  "components/script_bindings/buffer_source.rs:328",
+  "components/script_bindings/buffer_source.rs:347",
+  "components/script_bindings/buffer_source.rs:475",
+]
+
+[[entry]]
+name = "JS_IsDeadWrapper"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:614",
+]
+
+[[entry]]
+name = "JS_IsExceptionPending"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/js.rs:78",
+  "host_load_imported_module",
+]
+
+[[entry]]
+name = "JS_IsGlobalObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:759",
+  "components/script_bindings/utils.rs:840",
+]
+
+[[entry]]
+name = "JS_IsIdentifier"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/indexeddb/key.rs:158",
+]
+
+[[entry]]
+name = "JS_IsTypedArrayObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:397",
+]
+
+[[entry]]
+name = "JS_IterateCompartments"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:223",
+]
+
+[[entry]]
+name = "JS_LinkConstructorAndPrototype"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:326",
+]
+
+[[entry]]
+name = "JS_MayResolveStandardClass"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:807",
+]
+
+[[entry]]
+name = "JS_MaybeGC"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/window.rs:1120",
+]
+
+[[entry]]
+name = "JS_NewBigInt64ArrayWithBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:944",
+]
+
+[[entry]]
+name = "JS_NewBigUint64ArrayWithBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:950",
+]
+
+[[entry]]
+name = "JS_NewContext"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "create",
+]
+
+[[entry]]
+name = "JS_NewDataView"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:850",
+]
+
+[[entry]]
+name = "JS_NewEnumerateStandardClasses"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:760",
+]
+
+[[entry]]
+name = "JS_NewFloat16ArrayWithBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:956",
+]
+
+[[entry]]
+name = "JS_NewFloat32Array"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs typedarray.rs TypedArray<Float32>::create",
+]
+
+[[entry]]
+name = "JS_NewFloat32ArrayWithBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:926",
+]
+
+[[entry]]
+name = "JS_NewFloat64Array"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs typedarray.rs TypedArray<Float64>::create",
+]
+
+[[entry]]
+name = "JS_NewFloat64ArrayWithBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:932",
+]
+
+[[entry]]
+name = "JS_NewFunction"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "NewFunctionWithReserved",
+  "components/script/dom/bindings/function.rs:50",
+  "components/script/dom/promise/promise.rs:248",
+  "components/script_bindings/interface.rs:354",
+]
+
+[[entry]]
+name = "JS_NewGlobalObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:173",
+]
+
+[[entry]]
+name = "JS_NewInt16ArrayWithBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:908",
+]
+
+[[entry]]
+name = "JS_NewInt32Array"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs typedarray.rs TypedArray<Int32>::create",
+]
+
+[[entry]]
+name = "JS_NewInt32ArrayWithBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:914",
+]
+
+[[entry]]
+name = "JS_NewInt8ArrayWithBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:890",
+]
+
+[[entry]]
+name = "JS_NewObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/js.rs:106",
+]
+
+[[entry]]
+name = "JS_NewObjectWithGivenProto"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/js.rs:119",
+]
+
+[[entry]]
+name = "JS_NewObjectWithoutMetadata"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script_bindings/codegen/codegen.py:4110; generated Bindings",
+]
+
+[[entry]]
+name = "JS_NewPlainObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/testing/testbinding.rs:239",
+  "components/script/dom/testing/testbinding.rs:566",
+  "components/script_bindings/constructor.rs:125",
+  "components/script_bindings/record.rs:187",
+]
+
+[[entry]]
+name = "JS_NewRealmOptions"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "default",
+]
+
+[[entry]]
+name = "JS_NewStringCopyN"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_module.rs:761",
+  "components/script_bindings/conversions.rs:119",
+  "components/script_bindings/interface.rs:488",
+]
+
+[[entry]]
+name = "JS_NewStringCopyUTF8N"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:355",
+]
+
+[[entry]]
+name = "JS_NewUint16ArrayWithBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:902",
+]
+
+[[entry]]
+name = "JS_NewUint32Array"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs typedarray.rs TypedArray<Uint32>::create",
+]
+
+[[entry]]
+name = "JS_NewUint32ArrayWithBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:920",
+]
+
+[[entry]]
+name = "JS_NewUint8Array"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs typedarray.rs TypedArray<Uint8>::create",
+]
+
+[[entry]]
+name = "JS_NewUint8ArrayWithBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:896",
+]
+
+[[entry]]
+name = "JS_NewUint8ClampedArray"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs typedarray.rs TypedArray<ClampedU8>::create",
+]
+
+[[entry]]
+name = "JS_NewUint8ClampedArrayWithBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:938",
+]
+
+[[entry]]
+name = "JS_ParseJSON"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/xmlhttprequest/xmlhttprequest.rs:1538",
+  "components/script/fetch/body.rs:849",
+  "components/script_webcrypto/subtlecrypto.rs:4372",
+]
+
+[[entry]]
+name = "JS_ReadBytes"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/principals.rs:78",
+]
+
+[[entry]]
+name = "JS_ReadStructuredClone"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/structuredclone.rs:760",
+]
+
+[[entry]]
+name = "JS_ReadUint32Pair"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/principals.rs:67",
+  "components/script/dom/bindings/structuredclone.rs:175",
+]
+
+[[entry]]
+name = "JS_RequestInterruptCallback"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reinterrupt",
+]
+
+[[entry]]
+name = "JS_ResolveStandardClass"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:841",
+]
+
+[[entry]]
+name = "JS_SetElement"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: components/script_bindings/codegen/codegen.py:4983,5044; generated Bindings",
+]
+
+[[entry]]
+name = "JS_SetGCCallback"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:627",
+]
+
+[[entry]]
+name = "JS_SetGCParameter"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:787",
+  "components/script/runtime/script_runtime.rs:797",
+  "components/script/runtime/script_runtime.rs:803",
+  "components/script/runtime/script_runtime.rs:809",
+  "components/script/runtime/script_runtime.rs:811",
+  "components/script/runtime/script_runtime.rs:818",
+  "components/script/runtime/script_runtime.rs:821",
+  "components/script/runtime/script_runtime.rs:825",
+  "components/script/runtime/script_runtime.rs:833",
+  "components/script/runtime/script_runtime.rs:840",
+  "components/script/runtime/script_runtime.rs:843",
+  "components/script/runtime/script_runtime.rs:846",
+  "components/script/runtime/script_runtime.rs:849",
+  "components/script/runtime/script_runtime.rs:852",
+  "create",
+]
+
+[[entry]]
+name = "JS_SetGlobalJitCompilerOption"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:723",
+  "components/script/runtime/script_runtime.rs:728",
+  "components/script/runtime/script_runtime.rs:733",
+  "components/script/runtime/script_runtime.rs:758",
+  "components/script/runtime/script_runtime.rs:764",
+  "components/script/runtime/script_runtime.rs:773",
+]
+
+[[entry]]
+name = "JS_SetImmutablePrototype"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/window_named_properties.rs:274",
+]
+
+[[entry]]
+name = "JS_SetNativeStackQuota"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "create",
+]
+
+[[entry]]
+name = "JS_SetOffthreadIonCompilationEnabled"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:763",
+]
+
+[[entry]]
+name = "JS_SetPendingException"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/js.rs:71",
+]
+
+[[entry]]
+name = "JS_SetProperty"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:276",
+]
+
+[[entry]]
+name = "JS_SetPrototype"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/constructor.rs:237",
+  "components/script_bindings/observablearray.rs:224",
+]
+
+[[entry]]
+name = "JS_SetReservedSlot"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:186",
+  "components/script_bindings/interface.rs:190",
+  "components/script_bindings/observablearray.rs:160",
+  "components/script_bindings/wrap.rs:124",
+]
+
+[[entry]]
+name = "JS_SetSecurityCallbacks"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:620",
+]
+
+[[entry]]
+name = "JS_SetTrustedPrincipals"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:169",
+]
+
+[[entry]]
+name = "JS_ShutDown"
+status = "empty"
+mode = "indirect"
+provenance = [
+  "drop",
+]
+
+[[entry]]
+name = "JS_StackCapture_AllFrames"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "new",
+]
+
+[[entry]]
+name = "JS_StackCapture_MaxFrames"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "new",
+]
+
+[[entry]]
+name = "JS_Stringify"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:730",
+]
+
+[[entry]]
+name = "JS_TransplantObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:998",
+]
+
+[[entry]]
+name = "JS_TypeOfValue"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/event_loop/webdriver_handlers.rs:357",
+]
+
+[[entry]]
+name = "JS_ValueToFunction"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:499",
+]
+
+[[entry]]
+name = "JS_ValueToObject"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: engine/string.rs:933 ToObjectSlow -> :944 super::JS_ValueToObject",
+]
+
+[[entry]]
+name = "JS_ValueToSource"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:174",
+  "components/script_bindings/proxyhandler.rs:274",
+]
+
+[[entry]]
+name = "JS_WrapObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/constructor.rs:233",
+  "components/script_bindings/callback.rs:340",
+  "components/script_bindings/interface.rs:677",
+  "components/script_bindings/proxyhandler.rs:591",
+  "components/script_bindings/wrap.rs:113",
+  "maybe_wrap_object",
+]
+
+[[entry]]
+name = "JS_WrapValue"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:654",
+  "maybe_wrap_object_value",
+  "maybe_wrap_value",
+]
+
+[[entry]]
+name = "JS_WriteBytes"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/principals.rs:50",
+]
+
+[[entry]]
+name = "JS_WriteStructuredClone"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/structuredclone.rs:665",
+]
+
+[[entry]]
+name = "JS_WriteUint32PairUnchecked"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/principals.rs:43",
+  "components/script/dom/bindings/structuredclone.rs:223",
+  "components/script/dom/bindings/structuredclone.rs:228",
+]
+
+[[entry]]
+name = "JobQueueIsEmpty"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:245",
+]
+
+[[entry]]
+name = "JobQueueMayNotBeEmpty"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:200",
+]
+
+[[entry]]
+name = "LeaveRealm"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/callback.rs:374",
+  "drop",
+]
+
+[[entry]]
+name = "LoadRequestedModules1"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/module_loading.rs:218",
+  "components/script/scripting/module_loading.rs:274",
+]
+
+[[entry]]
+name = "MapEntries"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:334",
+]
+
+[[entry]]
+name = "MapSize"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/console.rs:368",
+]
+
+[[entry]]
+name = "MaybeGetHostDefinedDataFromJSMicroTask"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:265",
+]
+
+[[entry]]
+name = "MaybeGetPromiseFromJSMicroTask"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:275",
+]
+
+[[entry]]
+name = "ModuleEvaluate"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/module_loading.rs:317",
+  "components/script/scripting/script_execution.rs:372",
+]
+
+[[entry]]
+name = "ModuleLink"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/module_loading.rs:118",
+  "components/script/scripting/module_loading.rs:302",
+]
+
+[[entry]]
+name = "NewArrayBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "NewArrayBufferWithContents",
+  "components/script_bindings/buffer_source.rs:985",
+]
+
+[[entry]]
+name = "NewArrayBufferWithContents"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:755",
+]
+
+[[entry]]
+name = "NewArrayObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/worklet/paintworkletglobalscope.rs:325",
+]
+
+[[entry]]
+name = "NewArrayObject1"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/indexeddb/key.rs:93",
+  "components/script_bindings/observablearray.rs:103",
+  "components/script_bindings/observablearray.rs:220",
+]
+
+[[entry]]
+name = "NewCompileOptions"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "new",
+]
+
+[[entry]]
+name = "NewDateObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/html/form_controls/htmlinputelement.rs:1343",
+  "components/script/dom/indexeddb/key.rs:58",
+  "components/script/dom/indexeddb/key.rs:582",
+]
+
+[[entry]]
+name = "NewEnvironmentChain"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "new",
+]
+
+[[entry]]
+name = "NewExternalArrayBuffer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_webgpu/datablock.rs:98",
+]
+
+[[entry]]
+name = "NewFrontendContext"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "new",
+]
+
+[[entry]]
+name = "NewFunctionWithReserved"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/promise/promise.rs:489",
+  "components/script/scripting/module_loading.rs:188",
+  "components/script/scripting/module_loading.rs:195",
+]
+
+[[entry]]
+name = "NewJSAutoStructuredCloneBuffer"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "new",
+]
+
+[[entry]]
+name = "NewPromiseObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/promise/promise.rs:258",
+]
+
+[[entry]]
+name = "NewProxyObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/window_named_properties.rs:262",
+  "components/script_bindings/observablearray.rs:110",
+  "components/script_bindings/wrap.rs:87",
+  "components/script_bindings/wrap.rs:96",
+]
+
+[[entry]]
+name = "NewUCRegExpObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/html/form_controls/htmlinputelement.rs:2801",
+]
+
+[[entry]]
+name = "NewWeakMapObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:538",
+]
+
+[[entry]]
+name = "NewWindowProxy"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:1814",
+]
+
+[[entry]]
+name = "ObjectIsDate"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/html/form_controls/htmlinputelement.rs:1365",
+  "components/script/dom/indexeddb/key.rs:265",
+]
+
+[[entry]]
+name = "ObjectIsRegExp"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/html/form_controls/htmlinputelement.rs:2815",
+]
+
+[[entry]]
+name = "OwningCompileOptions_for_fc"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "new_for_fc",
+]
+
+[[entry]]
+name = "PendingExceptionStackInfo"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "error_info_from_exception_stack",
+]
+
+[[entry]]
+name = "PrepareForInstantiate"
+status = "empty"
+mode = "indirect"
+provenance = [
+  "compile_to_stencil_offthread",
+]
+
+[[entry]]
+name = "RUST_FUNCTION_VALUE_TO_JITINFO"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:442",
+  "components/script_bindings/utils.rs:697",
+]
+
+[[entry]]
+name = "RUST_INTERNED_STRING_TO_JSID"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:1041",
+  "components/script_bindings/proxyhandler.rs:318",
+  "components/script_bindings/proxyhandler.rs:500",
+]
+
+[[entry]]
+name = "RUST_JSID_IS_VOID"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:267",
+]
+
+[[entry]]
+name = "RUST_SYMBOL_TO_JSID"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:286",
+]
+
+[[entry]]
+name = "RealmBehaviorsRef"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: engine/proxy.rs:1862 RealmBehaviorsRef1 -> :1864 RealmBehaviorsRef",
+]
+
+[[entry]]
+name = "RealmCreationOptionsRef"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: engine/proxy.rs:1850 RealmCreationOptionsRef1 -> :1852 RealmCreationOptionsRef",
+]
+
+[[entry]]
+name = "RegisterScriptEnvironmentPreparer"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:710",
+]
+
+[[entry]]
+name = "RejectPromise"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/promise/promise.rs:347",
+]
+
+[[entry]]
+name = "RemoveAssociatedMemory"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/reflector.rs:177",
+  "components/script_bindings/reflector.rs:189",
+]
+
+[[entry]]
+name = "RemoveRawValueRoot"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/permanent_root.rs:52",
+]
+
+[[entry]]
+name = "ResolvePromise"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/promise/promise.rs:319",
+]
+
+[[entry]]
+name = "RunJSMicroTask"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:291",
+]
+
+[[entry]]
+name = "RunScriptEnvironmentPreparerClosure"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:1391",
+]
+
+[[entry]]
+name = "RuntimeHeapState"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/script_runtime.rs:23",
+]
+
+[[entry]]
+name = "SameValue"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/indexeddb/key.rs:231",
+  "components/script/dom/node/customelementregistry.rs:1194",
+]
+
+[[entry]]
+name = "SetAnyPromiseIsHandled"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/promise/promise.rs:417",
+]
+
+[[entry]]
+name = "SetArrayLength"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/observablearray.rs:281",
+  "components/script_bindings/observablearray.rs:449",
+]
+
+[[entry]]
+name = "SetBuildId"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:1034",
+]
+
+[[entry]]
+name = "SetDOMCallbacks"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:647",
+]
+
+[[entry]]
+name = "SetDOMProxyInformation"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:100",
+]
+
+[[entry]]
+name = "SetDataPropertyDescriptor"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:261",
+]
+
+[[entry]]
+name = "SetFunctionNativeReserved"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/promise/promise.rs:494",
+  "components/script/dom/promise/promise.rs:495",
+  "components/script/scripting/module_loading.rs:204",
+  "components/script/scripting/module_loading.rs:211",
+  "components/script/scripting/module_loading.rs:85",
+  "components/script/scripting/script_module.rs:795",
+]
+
+[[entry]]
+name = "SetGCSliceCallback"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:634",
+]
+
+[[entry]]
+name = "SetJobQueue"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:72",
+]
+
+[[entry]]
+name = "SetModuleLoadHook"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_module.rs:666",
+]
+
+[[entry]]
+name = "SetModuleMetadataHook"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_module.rs:667",
+]
+
+[[entry]]
+name = "SetModulePrivate"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_module.rs:252",
+]
+
+[[entry]]
+name = "SetNativeStackQuota"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "set_stack_quota",
+]
+
+[[entry]]
+name = "SetPreserveWrapperCallbacks"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:648",
+]
+
+[[entry]]
+name = "SetProcessBuildIdOp"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:750",
+]
+
+[[entry]]
+name = "SetPromiseRejectionTrackerCallback"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:704",
+]
+
+[[entry]]
+name = "SetPromiseUserInputEventHandlingState"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/promise/promise.rs:265",
+]
+
+[[entry]]
+name = "SetPropertyIgnoringNamedGetter"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "SetPropertyIgnoringNamedGetter",
+  "components/script_bindings/proxyhandler.rs:746",
+  "set",
+]
+
+[[entry]]
+name = "SetProxyPrivate"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:248",
+]
+
+[[entry]]
+name = "SetProxyReservedSlot"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:1002",
+  "components/script/dom/window/windowproxy.rs:241",
+  "components/script/dom/window/windowproxy.rs:304",
+  "components/script/dom/window/windowproxy.rs:977",
+  "components/script/dom/window/windowproxy.rs:979",
+  "components/script/dom/window/windowproxy.rs:992",
+  "components/script_bindings/observablearray.rs:124",
+  "components/script_bindings/observablearray.rs:158",
+  "components/script_bindings/observablearray.rs:175",
+  "components/script_bindings/observablearray.rs:230",
+  "components/script_bindings/proxyhandler.rs:544",
+  "components/script_bindings/wrap.rs:107",
+]
+
+[[entry]]
+name = "SetRealmPrincipals"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/window.rs:3564",
+]
+
+[[entry]]
+name = "SetScriptPrivate"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_execution.rs:461",
+]
+
+[[entry]]
+name = "SetScriptPrivateReferenceHooks"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_module.rs:668",
+]
+
+[[entry]]
+name = "SetUpEventLoopDispatch"
+status = "empty"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:684",
+]
+
+[[entry]]
+name = "SetWarningReporter"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "create",
+]
+
+[[entry]]
+name = "SetWeakMapEntry"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/proxyhandler.rs:659",
+]
+
+[[entry]]
+name = "SetWindowProxy"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:1009",
+  "components/script/dom/window/windowproxy.rs:248",
+  "components/script/dom/window/windowproxy.rs:311",
+]
+
+[[entry]]
+name = "SetWindowProxyClass"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/event_loop/script_thread.rs:864",
+]
+
+[[entry]]
+name = "SliceRootedIdVector"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "deref",
+]
+
+[[entry]]
+name = "StackGCVectorStringAtIndex"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "at",
+]
+
+[[entry]]
+name = "StackGCVectorStringLength"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "len",
+]
+
+[[entry]]
+name = "StackGCVectorValueAtIndex"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "at",
+]
+
+[[entry]]
+name = "StackGCVectorValueLength"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "len",
+]
+
+[[entry]]
+name = "StealArrayBufferContents"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/buffer_source.rs:735",
+]
+
+[[entry]]
+name = "StencilRelease"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "drop",
+]
+
+[[entry]]
+name = "StreamConsumerConsumeChunk"
+status = "todo"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:1226",
+]
+
+[[entry]]
+name = "StreamConsumerNoteResponseURLs"
+status = "todo"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:1262",
+]
+
+[[entry]]
+name = "StreamConsumerStreamEnd"
+status = "todo"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:1232",
+]
+
+[[entry]]
+name = "StreamConsumerStreamError"
+status = "todo"
+mode = "direct"
+provenance = [
+  "components/script/runtime/script_runtime.rs:1240",
+]
+
+[[entry]]
+name = "StringIsArrayIndex"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/utils.rs:180",
+]
+
+[[entry]]
+name = "ThreadStackQuotaForSize"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "set_stack_quota",
+]
+
+[[entry]]
+name = "ThrowOnModuleEvaluationFailure"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/scripting/script_execution.rs:384",
+]
+
+[[entry]]
+name = "ToBooleanSlow"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "ToBoolean",
+]
+
+[[entry]]
+name = "ToInt32Slow"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "ToInt32",
+]
+
+[[entry]]
+name = "ToInt64Slow"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "ToInt64",
+]
+
+[[entry]]
+name = "ToJSON"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/str.rs:199",
+]
+
+[[entry]]
+name = "ToMaybeWrappedJSMicroTask"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/runtime/job_queue.rs:259",
+]
+
+[[entry]]
+name = "ToNumberSlow"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "ToNumber",
+]
+
+[[entry]]
+name = "ToStringSlow"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "ToString",
+]
+
+[[entry]]
+name = "ToUint16Slow"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "ToUint16",
+]
+
+[[entry]]
+name = "ToUint32Slow"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "ToUint32",
+]
+
+[[entry]]
+name = "ToUint64Slow"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "ToUint64",
+]
+
+[[entry]]
+name = "ToWindowIfWindowProxy"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "global_realm",
+]
+
+[[entry]]
+name = "ToWindowProxyIfWindowSlow"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "outerize",
+  "try_to_outerize",
+  "try_to_outerize_object",
+]
+
+[[entry]]
+name = "TraceValueArray"
+status = "empty"
+mode = "indirect"
+provenance = [
+  "trace",
+]
+
+[[entry]]
+name = "UncheckedUnwrapObject"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/interface.rs:441",
+  "components/script_bindings/proxyhandler.rs:611",
+]
+
+[[entry]]
+name = "UnhideScriptedCaller"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script_bindings/settings_stack.rs:108",
+]
+
+[[entry]]
+name = "UnwrapArrayBuffer"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs typedarray.rs:459 -> UnwrapArrayBuffer",
+]
+
+[[entry]]
+name = "UnwrapArrayBufferView"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs typedarray.rs:467 -> UnwrapArrayBufferView",
+]
+
+[[entry]]
+name = "UnwrapFloat32Array"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs typedarray.rs TypedArray<Float32>",
+]
+
+[[entry]]
+name = "UnwrapFloat64Array"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs typedarray.rs TypedArray<Float64>",
+]
+
+[[entry]]
+name = "UnwrapInt32Array"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs typedarray.rs TypedArray<Int32>",
+]
+
+[[entry]]
+name = "UnwrapObjectDynamic"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/constructor.rs:80",
+  "components/script_bindings/conversions.rs:296",
+]
+
+[[entry]]
+name = "UnwrapObjectStatic"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/constructor.rs:109",
+  "components/script/dom/bindings/utils.rs:56",
+  "components/script/dom/node/customelementregistry.rs:396",
+]
+
+[[entry]]
+name = "UnwrapUint32Array"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs typedarray.rs TypedArray<Uint32>",
+]
+
+[[entry]]
+name = "UnwrapUint8Array"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs typedarray.rs TypedArray<Uint8>",
+]
+
+[[entry]]
+name = "UnwrapUint8ClampedArray"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "reviewed: mozjs typedarray.rs TypedArray<ClampedU8>",
+]
+
+[[entry]]
+name = "WrapperNew"
+status = "implemented"
+mode = "indirect"
+provenance = [
+  "NewWindowProxy",
+]
+
+[[entry]]
+name = "WriteBytesToJSStructuredCloneData"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/bindings/structuredclone.rs:754",
+]
+
+[[entry]]
+name = "int_to_jsid"
+status = "implemented"
+mode = "direct"
+provenance = [
+  "components/script/dom/window/windowproxy.rs:1660",
+  "components/script/dom/window/windowproxy.rs:1704",
+  "components/script_bindings/observablearray.rs:598",
+  "components/script_bindings/proxyhandler.rs:1030",
+  "components/script_bindings/proxyhandler.rs:1111",
+]

@@ -1,0 +1,7 @@
+[toolchain]
+# The contract suite is formatted with Servo's tidy options. Servo pins the rustfmt that defines
+# that result, so pin it here too: the same source formatted by two rustfmt versions can produce
+# different line breaks, which would make `check-rustfmt` depend on the runner's default toolchain.
+# Keep this in sync with `rust-toolchain.toml` in servo-ohos.
+channel = "1.99.1"
+components = ["rustfmt"]

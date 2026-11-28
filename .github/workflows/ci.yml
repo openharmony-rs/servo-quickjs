@@ -23,6 +23,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo fmt --check
         working-directory: fuzz
+      # `engine-contract` is a separate workspace, so `cargo fmt --all` above cannot see it.
+      - run: engine-contract/tools/run.sh check-rustfmt
 
   test:
     runs-on: ubuntu-24.04
@@ -45,6 +47,44 @@ jobs:
         run: just test-verify
       - name: Tests with autorelease pool statistics
         run: just test-pool-stats --test qjs_pool_stats
+
+  contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System ICU, for the Intl subset
+        run: pkg-config --exists icu-i18n || (sudo apt-get update && sudo apt-get install -y libicu-dev)
+      # `run.sh` runs the QuickJS leg with `--offline`, so the first run needs a populated cache.
+      # The committed lockfile describes the registry `mozjs` graph; the QuickJS leg replaces it
+      # with the local shim, which adds dependencies that fetch does not select. Fetch the patched
+      # graph as well, then restore the lockfile: patching rewrites it, and `run.sh` refuses to
+      # start on a dirty lockfile. `cargo fetch` selects one graph, so the SpiderMonkey leg needs
+      # the registry graph fetched separately or it fails offline before it builds anything.
+      - name: Fetch engine-contract dependencies
+        run: |
+          cargo fetch --locked
+          cargo fetch --config "patch.crates-io.mozjs.path=\"${GITHUB_WORKSPACE}/mozjs\""
+          git checkout -- Cargo.lock
+        working-directory: engine-contract
+      # The tools decide which entries the suite must cover and which differences it accepts, so
+      # a regression there can weaken the gate without failing a case.
+      - name: Contract tool tests
+        run: engine-contract/tools/run.sh run-tool-tests
+      # With `jit` the SpiderMonkey leg is a cheap archive link, so run it and fail on a diff
+      # against the golden records: a case edited without regenerating them is caught here.
+      - name: SpiderMonkey contract matches the golden records
+        run: |
+          engine-contract/tools/run.sh run-spidermonkey-contract
+          diff -u engine-contract/spidermonkey-contract-results.jsonl \
+            engine-contract/target/contract/spidermonkey-contract-results.jsonl
+          diff -u engine-contract/spidermonkey-contract-cases.json \
+            engine-contract/target/contract/spidermonkey-contract-cases.json
+      # The isolated runner's exit handling only acts when a case crashes, which no case does today.
+      - name: Isolated runner unit tests
+        run: cargo test --locked --offline --release -p engine_contract_tests -- support::isolated_exit_tests
+        working-directory: engine-contract
+      - name: QuickJS contract against the SpiderMonkey golden records
+        run: engine-contract/tools/run.sh run-quickjs-against-golden
 
   asan:
     runs-on: ubuntu-24.04

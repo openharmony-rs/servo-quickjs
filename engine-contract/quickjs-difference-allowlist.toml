@@ -1,0 +1,341 @@
+# Known QuickJS defects relative to the SpiderMonkey contract.
+#
+# SpiderMonkey is the reference implementation. Each entry names one case and what may differ in
+# it. The comparison still prints every known defect; an unlisted difference fails the run. Never
+# add an entry merely to silence a failure, and remove it when the shim is fixed.
+#
+# fields:   the record keys that may differ: `apis`, `exception`, or one observation field as
+#           `fields.<name>`. Every other field recorded by both engines is still compared, and a
+#           listed field that no longer differs fails as stale. Optional when `panic` covers the
+#           whole difference.
+#
+# status:   pending | bug | known-bug | accepted | wontfix. accepted and wontfix are released as
+#           accepted behaviour differences, and known-bug is released as a shim defect that is
+#           tracked by an issue; all three keep the gate green but stay visible in the report.
+#           pending and bug still fail the comparison.
+# severity: P0 | P1 | P2 | P3. P0 and P1 cannot be released as accepted/wontfix/known-bug.
+#
+# Optional: `issue` links the tracking issue for a difference that is still present. `pending`,
+# `bug` and `known-bug` entries must name a real tracking issue; accepted/wontfix entries may
+# omit it.
+#
+# Optional: `steps` names the sub-scenarios that fail on QuickJS, and needs `panic`. It must equal
+# the steps in `fields.step_failures`: a newly failing step, or a listed step that passes again,
+# fails the comparison.
+#
+# Optional: `panic` is an exact QuickJS panic fingerprint (for a `Steps` case, the first failing
+# step's panic). A panicking case stops recording and a failed step drops its observations, so
+# the fields QuickJS did not record are accepted only behind a matching `panic`. Panic text that
+# changes, or a panic where none is listed, fails the comparison. When a difference is fixed, add
+# a record to
+# `quickjs-shim-fix-records.md`, then
+# delete the entry here.
+
+[[difference]]
+id = "rooter.trace_on_gc"
+panic = "the custom rooter trace callback did not run during an explicit collection"
+reason = "Accepted ownership difference: QuickJS does not trace Rust roots. docs/design.md:59-62 records that JS_AddExtraGCRootsTracer is a no-op and that Rust-side roots are counted or pooled instead, so a CustomAutoRooter trace callback has nothing to mark and does not run during an explicit collection."
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "eval.environment_chain"
+steps = ["environment_chain"]
+panic = """assertion `left == right` failed
+  left: 12
+ right: 13"""
+reason = "Known shim defect (tracked in https://github.com/openharmony-rs/servo-ohos/issues/57): QuickJS wraps environment-chain scopes in append order, so a later appended outer scope shadows an earlier inner scope; SpiderMonkey gives earlier appends precedence."
+owner = "servo-quickjs"
+issue = "https://github.com/openharmony-rs/servo-ohos/issues/57"
+status = "known-bug"
+severity = "P2"
+
+[[difference]]
+id = "objects.core"
+fields = ["fields.regexp_syntax_error"]
+steps = ["property_keys"]
+panic = """assertion `left == right` failed
+  left: ([3], 1)
+ right: ([], 0)"""
+reason = "JSITER_SYMBOLSONLY is a proxy-only flag in SpiderMonkey; QuickJS also treats it as symbol selection for ordinary objects. The RegExp syntax error message is engine wording: QuickJS reports \"expecting ')'\" where SpiderMonkey reports \"unterminated parenthetical\"."
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "strings.core"
+steps = ["value_to_source"]
+panic = '''assertion `left == right` failed: ValueToSource(({a: 1, 'b c': [2], 3: undefined, [Symbol.iterator]: 0}))
+  left: "({3:(void 0), a:1, \"b c\":[2], [Symbol.iterator]:0})"
+ right: "({3:(void 0), a:1, 'b c':[2], [Symbol.iterator]:0})"'''
+reason = "JS_ValueToSource uses double quotes for property names; SpiderMonkey keeps the source quote style"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "misc.gc_state"
+panic = """assertion `left == right` failed
+  left: "Object"
+ right: "JS Object\""""
+reason = "GCTraceKindToAscii returns QuickJS class names such as Object; SpiderMonkey returns JS Object"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "errors.core"
+steps = [
+    "report_thrown_error_location",
+    "report_error_from_exception",
+    "stacks",
+    "get_saved_frame_column",
+    "describe_scripted_caller",
+]
+panic = """assertion `left == right` failed
+  left: (2, 22)
+ right: (2, 9)"""
+reason = "QuickJS reports the Error construction column; SpiderMonkey reports the throw site column"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "errors.get_scripted_caller_private_api"
+fields = ["fields.private"]
+reason = "Known shim defect (tracked in #33): JS_GetScriptedCallerPrivate reuses scripted_caller(), which honours HideScriptedCaller (error.rs:103-125), so the private value becomes undefined while the caller is hidden. Servo reads it from string timers (timers.rs:1127) after HideScriptedCaller."
+owner = "servo-quickjs"
+issue = "https://github.com/openharmony-rs/servo-quickjs/issues/33"
+status = "known-bug"
+severity = "P2"
+
+[[difference]]
+id = "errors.build_stack_string_api"
+panic = """assertion `left == right` failed: BuildStackString must format the captured frames
+  left: "probeTarget@capture.js:2:8\\n@capture.js:4:12\\n"
+ right: "probeTarget@capture.js:2:3\\n@capture.js:4:1\\n\""""
+reason = "QuickJS reports the end of the call expression as the saved-frame column; SpiderMonkey reports the call site column"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "edge.eval.compile_and_environment"
+panic = """assertion `left == right` failed: inner scope must shadow the later appended outer scope
+  left: 12
+ right: 13"""
+reason = "Known shim defect (tracked in https://github.com/openharmony-rs/servo-ohos/issues/57): QuickJS appends environment-chain scopes in the opposite order; the compiled function therefore sees 12 instead of 13."
+owner = "servo-quickjs"
+issue = "https://github.com/openharmony-rs/servo-ohos/issues/57"
+status = "known-bug"
+severity = "P2"
+
+[[difference]]
+id = "edge.promise.states_and_queue"
+panic = """assertion `left == right` failed: JS_RequestInterruptCallback must schedule the callback once
+  left: 0
+ right: 1"""
+reason = "QuickJS polls its interrupt handler every 10000 bytecode operations, so a requested interrupt is still pending when this 1000-iteration script finishes; the script completes with result 1000 and the callback has not run yet"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "edge.typed_arrays_shared_detach"
+fields = [
+    "fields.shared_alias",
+    "fields.shared_available",
+    "fields.shared_data_null",
+    "fields.shared_flag",
+    "fields.shared_len",
+    "fields.sharedness",
+]
+reason = "QuickJS supports SharedArrayBuffer and SharedArrayBuffer-backed views; this SpiderMonkey build reports shared memory as unavailable"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "edge.weakmap"
+panic = "assertion failed: SetWeakMapEntry(cx, weak.handle(), key.handle(), one.handle())"
+reason = "Known shim defect (tracked in https://github.com/openharmony-rs/servo-ohos/issues/57): QuickJS holder maps only accept realm key objects; GetWeakMapEntry returns undefined for an ordinary object key but SetWeakMapEntry with one returns false."
+owner = "servo-quickjs"
+issue = "https://github.com/openharmony-rs/servo-ohos/issues/57"
+status = "known-bug"
+severity = "P3"
+
+[[difference]]
+id = "edge.weakmap_overwrite"
+panic = "assertion failed: SetWeakMapEntry(cx, weak.handle(), key.handle(), one.handle())"
+reason = "Known shim defect (tracked in https://github.com/openharmony-rs/servo-ohos/issues/57): QuickJS holder maps only accept realm key objects; SetWeakMapEntry with an ordinary object key returns false."
+owner = "servo-quickjs"
+issue = "https://github.com/openharmony-rs/servo-ohos/issues/57"
+status = "known-bug"
+severity = "P3"
+
+[[difference]]
+id = "objects.weakmap_wpt_get_entry"
+panic = "assertion failed: SetWeakMapEntry(cx, weak.handle(), key.handle(), value.handle())"
+reason = "Known shim defect (tracked in https://github.com/openharmony-rs/servo-ohos/issues/57): QuickJS holder maps only accept realm key objects, so the real test262 WeakMap.get case cannot store an ordinary object key through SetWeakMapEntry."
+owner = "servo-quickjs"
+issue = "https://github.com/openharmony-rs/servo-ohos/issues/57"
+status = "known-bug"
+severity = "P3"
+
+[[difference]]
+id = "objects.weakmap_wpt_set_entry"
+panic = "assertion failed: SetWeakMapEntry(cx, weak.handle(), key.handle(), value.handle())"
+reason = "Known shim defect (tracked in https://github.com/openharmony-rs/servo-ohos/issues/57): QuickJS holder maps only accept realm key objects, so the real test262 WeakMap.set case cannot store its ordinary object keys through SetWeakMapEntry."
+owner = "servo-quickjs"
+issue = "https://github.com/openharmony-rs/servo-ohos/issues/57"
+status = "known-bug"
+severity = "P3"
+
+[[difference]]
+id = "misc.gc_callbacks"
+panic = "assertion failed: gc_callback_calls.parse::<u32>().unwrap_or(0) > 0"
+reason = "Accepted ownership difference for the callbacks and tracers: QuickJS has no tracing pass for Rust roots (docs/design.md:59-62), so JS_SetGCCallback, SetGCSliceCallback and JS_AddExtraGCRootsTracer are no-ops and the extra-root tracer never runs. The GC-parameter part is the separate, tracked defect #25 (runtime.context_lifecycle)."
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "misc.roots_options_memory"
+fields = ["fields.wasm_initial"]
+steps = ["raw_root"]
+panic = """assertion `left == right` failed: RemoveRawValueRoot did not release the object
+  left: 0
+ right: 1"""
+reason = "Accepted pool lifetime: RemoveRawValueRoot frees exactly the reference AddRawValueRoot took (misc.rs:64-86). The object survives the following collection because JS_NewObject's result is in the autorelease pool until the task ends (docs/design.md:29,36), not because the root kept an extra reference. The harness cannot yet drain the pool. The `options` step also reads the WebAssembly context option back as false: QuickJS has no WebAssembly."
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P2"
+
+[[difference]]
+id = "realm.enter_exit_and_private"
+fields = ["fields.global_trace_hook_calls"]
+reason = "Accepted trace-pass difference: QuickJS's cycle collector calls mark_children once in gc_decref (quickjs.c:6975) and again in gc_scan (:7017), so every trace hook runs once per collection pass. Patch Q41 (JS_GetGCPass) lets a tracer tell the passes apart; this is not a duplicate registration."
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "runtime.context_lifecycle"
+fields = ["fields.gc_parameter_applied", "fields.gc_parameter_previous", "fields.gc_parameter_restored", "fields.gc_parameter_target"]
+reason = "Known shim defect (tracked in #25): QuickJS's JS_Get/SetGCParameter do not persist the SpiderMonkey GC parameter values; reads return 0 and writes are not reflected back."
+owner = "servo-quickjs"
+issue = "https://github.com/openharmony-rs/servo-quickjs/issues/25"
+status = "known-bug"
+severity = "P3"
+
+[[difference]]
+id = "debugger.new_global_object_hook"
+panic = "JS_FireOnNewGlobalObject must deliver exactly one hook call: Number(0.0)"
+reason = "Known shim defect (tracked in #28): JS_FireOnNewGlobalObject is an empty body in QuickJS, so it never dispatches to any onNewGlobalObject handler and the hook fires 0 times instead of 1."
+owner = "servo-quickjs"
+issue = "https://github.com/openharmony-rs/servo-quickjs/issues/28"
+status = "known-bug"
+severity = "P3"
+
+[[difference]]
+id = "class.edge_tracers"
+fields = ["fields.untraced_children_finalized"]
+reason = "Accepted ownership difference: QuickJS does not trace Rust roots, so CallObjectRootTracer, CallValueRootTracer, CallPropertyDescriptorTracer and TraceValueArray are no-ops (docs/design.md:59-62). SpiderMonkey keeps the four raw-slot referents alive while tracing and collects all of them when tracing is disabled; QuickJS records 0 finalizers in both passes."
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P2"
+
+[[difference]]
+id = "realm.compartments"
+fields = ["fields.system"]
+reason = "QuickJS reports IsSystemCompartment as a constant false and has no system zone: a realm created with JS_SetTrustedPrincipals in effect is still not a system compartment, while SpiderMonkey counts one"
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "misc.standard_classes"
+fields = ["fields.may_resolve_count"]
+steps = ["enumerate", "atomize_and_resolve"]
+panic = "standard class enumeration returned no names"
+reason = "QuickJS defines every standard class eagerly, so a global's resolve and enumerate hooks have no class left to add lazily. The case observes different hook return values; no JS-visible behaviour difference has been demonstrated."
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "promise.internal_job_queue"
+panic = "assertion failed: HasAnyMicroTasks(cx)"
+reason = "Accepted internal-queue difference: this case installs QuickJS's own queue with UseInternalJobQueues (promises_test.rs:405), so reactions go to QuickJS's internal job list and HasAnyMicroTasks, which reads cx.hooks.microtasks, cannot see them. With Servo's SetJobQueue installed, enqueue_job (promise.rs:568-643) puts every job in cx.hooks.microtasks."
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+[[difference]]
+id = "streaming.consume_callback"
+panic = "case process exited without recording a result (terminated by signal 6)"
+reason = "Accepted capability difference: QuickJS has no WebAssembly, so it has no stream consumer to drive. The shim binds the StreamConsumer glue entry points to qjs_todo! and the first call aborts the case process. This is a missing engine feature, not a shim bug to fix."
+owner = "servo-quickjs"
+status = "accepted"
+severity = "P3"
+
+# ---------------------------------------------------------------------------
+# Cases that cannot yet prove anything about the entry points they name
+# ---------------------------------------------------------------------------
+# These are NOT differences. Do not copy them into [[difference]] entries: nothing here fails the
+# comparison today, because the case never observes a value that would change if the entry point
+# became a no-op. The list exists so the next person knows which coverage is real and which is
+# only nominal. Remove a line when its case gains a causal assertion.
+#
+# Recheck with the SpiderMonkey results: every case below either never calls the name it declares,
+# or reports a field that is identical on both engines by construction.
+#
+#   rg '"id": "(class.edge_tracers|event_loop.dispatchable_run|misc.build_ids|...)"' \
+#      target/contract/spidermonkey-contract-results.jsonl
+#
+# A. The entry point is never invoked by the case.
+#    event_loop.dispatchable_run        DispatchableRun
+#      JS::Dispatchable has no public constructor and a private vtable; a fake one would be UB.
+#      Needs C++ glue that hands the harness a real dispatchable.
+#    misc.jit_backend                   DisableJitBackend
+#      Must run before JS_Init and before any JSContext exists, but the suite shares one live
+#      engine. Needs a separate test binary.
+#    misc.process_lifecycle             JS_Init, JS_ShutDown
+#      Process-global and single-shot; JS_ShutDown would tear down the engine mid-run. The case
+#      only checks that a second JSEngine::init is rejected. Needs a separate test binary.
+#    stencil.offthread_compile_instantiate
+#                                       PrepareForInstantiate
+#      Reached only through the mozjs off-thread wrapper, and only its success value is observed
+#      (a false return would fail the case). An always-true shim cannot be told apart because no
+#      rejected (frontend context, stencil, storage) combination is constructible safely.
+#
+# B. The entry point is invoked, but the recorded field does not depend on it.
+#    realm.compartments                 AssertSameCompartment, IsSharableCompartment
+#      AssertSameCompartment is a debug-only assertion: in a release build it is compiled out, and
+#      a mismatched compartment aborts rather than producing a comparable observation.
+#      IsSharableCompartment is hard-coded true in the shim, and every realm this harness can
+#      create is sharable on SpiderMonkey too, so `sharable == total` passes on both engines.
+#    misc.engine_options                JS_SetGlobalJitCompilerOption,
+#                                       JS_SetOffthreadIonCompilationEnabled
+#      The setters return void. Reading back through JS_GetGlobalJitCompilerOption returns 0 for
+#      every option before and after the write on this build, including warmup triggers whose
+#      defaults are non-zero, so there is no value to compare.
+#    misc.self_hosted_code              InitSelfHostedCode
+#      The assertion is that [].map works, which does not depend on the call. No negative control
+#      exists in this harness: skipping, repeating or passing a SelfHostedWriter all segfault
+#      inside SpiderMonkey, and the cache is an opaque array passed by value.
+#    misc.build_ids                     SetBuildId, SetProcessBuildIdOp
+#      BuildIdCharVector is opaque with no accessor, SpiderMonkey has no GetBuildId, and the
+#      stencil encoder that would invoke the callback is not exported by bindgen.
+#    proxy.wrapper_callbacks            SetPreserveWrapperCallbacks
+#      The callbacks only fire when a cross-compartment wrapper is preserved, which needs a DOM
+#      proxy or an Xray wrapper. Neither exists in the suite.
+#    class.edge_tracers                 CallBigIntTracer, CallSymbolTracer, CallIdTracer
+#      BigInts and symbols have no object finalizer to count, atoms are reference-counted rather
+#      than collected, and proving they were marked needs IsAboutToBeFinalized, which bindgen
+#      does not export. CallPropertyDescriptorTracer is covered only in aggregate: the negative
+#      control disables the whole trace body, so it does not isolate that one call.
+#
+# Totals: 10 cases; 16 entry points with no causal check, plus CallPropertyDescriptorTracer
+# covered only in aggregate (17 names).
