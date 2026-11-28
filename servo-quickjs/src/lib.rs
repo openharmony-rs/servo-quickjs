@@ -65,6 +65,14 @@ pub unsafe fn JS_DupValueRT(_rt: *mut JSRuntime, v: JSValue) -> JSValue {
     v
 }
 
+/// The batched form of `JS_DupValueRT`: add several references at once.
+#[inline(always)]
+pub unsafe fn JS_DupValueRTCount(_rt: *mut JSRuntime, v: JSValue, count: i32) {
+    if count > 0 && v.has_ref_count() {
+        unsafe { *ref_count(v) += count };
+    }
+}
+
 /// The reference count of a value that has one.
 #[inline(always)]
 pub unsafe fn JS_GetRefCount(v: JSValue) -> i32 {
@@ -83,6 +91,20 @@ pub unsafe fn JS_FreeValueRT(rt: *mut JSRuntime, v: JSValue) {
             let count = ref_count(v);
             *count -= 1;
             if *count <= 0 {
+                __JS_FreeValueRT(rt, v);
+            }
+        }
+    }
+}
+
+/// The batched form of `JS_FreeValueRT`: free the value when the count reaches zero.
+#[inline(always)]
+pub unsafe fn JS_FreeValueRTCount(rt: *mut JSRuntime, v: JSValue, count: i32) {
+    if count > 0 && v.has_ref_count() {
+        unsafe {
+            let ref_count = ref_count(v);
+            *ref_count -= count;
+            if *ref_count <= 0 {
                 __JS_FreeValueRT(rt, v);
             }
         }

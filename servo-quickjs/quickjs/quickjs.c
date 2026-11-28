@@ -509,6 +509,7 @@ typedef enum {
     JS_GC_OBJ_TYPE_ASYNC_FUNCTION,
     JS_GC_OBJ_TYPE_JS_CONTEXT,
     JS_GC_OBJ_TYPE_MODULE,
+    JS_GC_OBJ_TYPE_DOM_STUB,
 } JSGCObjectTypeEnum;
 
 /* header for GC objects. GC objects are C data structures with a
@@ -517,6 +518,22 @@ typedef enum {
 struct JSGCObjectHeader {
     struct list_head link;
 };
+
+/* Servo: DOM Stub object. A small stand-in for a JSObject: it is a GC object with its own
+   reference count, but carries no shape or properties and no class id. The interface's class id
+   (and its `DOMJSClass`) is recorded on the Rust `Reflector` that `dom_ptr` points to.
+   TODO(Qingwei Li): embed the struct in Servo's reflector */
+typedef struct JSDomStub {
+    JSGCObjectHeader header;
+    /* Servo: the DOM node (its `Reflector`), owned by the stub until it is unbound or
+       finalized. `NULL` once the stub has been unbound. */
+    void *dom_ptr;
+    /* Servo: the realm (`RealmData*`) the DOM object belongs to. The stub holds one reference
+       to it; `NULL` once the stub has been unbound. */
+    void *realm;
+} JSDomStub;
+
+const int sizeofJSDomStub = sizeof(JSDomStub);
 
 typedef enum {
     JS_WEAKREF_TYPE_MAP,
@@ -4082,12 +4099,34 @@ JSClassID JS_NewClassID(JSClassID *pclass_id)
     return class_id;
 }
 
+/* Servo: resolves a JSDomStub's interface class id from its DOM node. Implemented by the Rust
+   shim (`mozjs/src/engine/class.rs`), which owns the `Reflector` layout: it dereferences the node
+   to its `DOMJSClass`, and maps that class to the QuickJS class id it was registered with.
+   Weak: a standalone QuickJS link without the shim still links, and its stubs have no class. */
+extern JSClassID servo_dom_stub_class_id(JSRuntime *rt, void *dom_ptr)
+    __attribute__((weak));
+
+/* Servo: the QuickJS class id of a JSDomStub's interface. A stub stores no class id: Servo
+   records the interface's class on the Rust `Reflector` that `dom_ptr` points to. `rt` may be
+   NULL where QuickJS has none at hand; the shim then uses the current context's runtime. */
+static JSClassID dom_stub_class_id(JSRuntime *rt, const JSDomStub *p)
+{
+    if (!p->dom_ptr || !servo_dom_stub_class_id)
+        return JS_INVALID_CLASS_ID;
+    return servo_dom_stub_class_id(rt, p->dom_ptr);
+}
+
 JSClassID JS_GetClassID(JSValue v)
 {
     JSObject *p;
     if (JS_VALUE_GET_TAG(v) != JS_TAG_OBJECT)
         return JS_INVALID_CLASS_ID;
     p = JS_VALUE_GET_OBJ(v);
+    /* Servo: a JSDomStub is not a JSObject; its interface's class id is recorded on the Rust
+       `Reflector` it points to. `JS_GetClassID` has no runtime at hand, so the shim uses the
+       current context's. */
+    if (js_rc(p)->gc_obj_type == JS_GC_OBJ_TYPE_DOM_STUB)
+        return dom_stub_class_id(NULL, (const JSDomStub *)p);
     return p->class_id;
 }
 
@@ -6649,6 +6688,91 @@ static void free_object(JSRuntime *rt, JSObject *p)
     }
 }
 
+/* Servo: DOM Stub object (see the definition near JSGCObjectHeader) */
+
+// Servo: allocate a new JSDomStub owning `dom_ptr` (a DOM node) and one reference to `realm`.
+// Either the class finalizer frees the node when the stub is collected, or the embedder hands the
+// node to a real JSObject and calls `JS_UnbindDomStub` before that. The stub's interface class is
+// recorded on the Rust `Reflector` that `dom_ptr` points to; see `free_dom_stub`.
+JSValue JS_NewDomStub(JSContext *ctx, void *dom_ptr, void *realm) {
+    JSDomStub *s;
+
+    js_trigger_gc(ctx->rt, sizeof(JSDomStub));
+    s = js_malloc(ctx, sizeof(JSDomStub));
+    if (unlikely(!s))
+        return JS_EXCEPTION;
+    s->dom_ptr = dom_ptr;
+    s->realm = realm;
+    js_rc(s)->ref_count = 1;
+    add_gc_object(ctx->rt, &s->header, JS_GC_OBJ_TYPE_DOM_STUB);
+    return JS_MKPTR(JS_TAG_OBJECT, s);
+}
+
+// Servo: detach the DOM node and realm from the stub, without freeing the stub. The stub may
+// still be referenced from the autorelease pool, so it is freed when its last reference goes
+// away; by then `dom_ptr` is `NULL` and `free_dom_stub` does not run the finalizer (the new
+// JSObject owns the DOM node and holds its own realm reference). The embedder releases the
+// stub's realm reference after this call.
+void JS_UnbindDomStub(JSContext *ctx, JSValue obj) {
+    assert(JS_IsDomStub(obj));
+    JSDomStub *p = (JSDomStub *)obj.u.ptr;
+    p->dom_ptr = NULL;
+    p->realm = NULL;
+}
+
+// Servo: whether `v` is a JSDomStub. A stub is a GC object that is not a JSObject, so this
+// cannot use JS_GetClassID() alone: a non-object value has no class id either.
+BOOL JS_IsDomStub(JSValueConst v) {
+    JSObject *p;
+    if (JS_VALUE_GET_TAG(v) != JS_TAG_OBJECT)
+        return FALSE;
+    p = JS_VALUE_GET_OBJ(v);
+    return js_rc(p)->gc_obj_type == JS_GC_OBJ_TYPE_DOM_STUB;
+}
+
+static JSDomStub *to_dom_stub(JSValueConst v) {
+    if (JS_VALUE_GET_TAG(v) != JS_TAG_OBJECT)
+        return NULL;
+    if (js_rc(JS_VALUE_GET_OBJ(v))->gc_obj_type != JS_GC_OBJ_TYPE_DOM_STUB)
+        return NULL;
+    return (JSDomStub *)JS_VALUE_GET_OBJ(v);
+}
+
+void *JS_GetDomStubDomPtr(JSValueConst v) {
+    JSDomStub *s = to_dom_stub(v);
+    return s ? s->dom_ptr : NULL;
+}
+
+void *JS_GetDomStubRealm(JSValueConst v) {
+    JSDomStub *s = to_dom_stub(v);
+    return s ? s->realm : NULL;
+}
+
+// Servo: free its corresponding DOM T in servo and free JSDomStub
+static void free_dom_stub(JSRuntime *rt, JSDomStub *p) {
+    JSClassFinalizer *finalizer;
+    JSClassID class_id;
+
+    // An unbound stub has no DOM node left to finalize. The stub's class is the interface class
+    // registered when the node was wrapped; its finalizer reaches the Rust `Reflector`.
+    class_id = dom_stub_class_id(rt, p);
+    finalizer = (p->dom_ptr && JS_IsRegisteredClass(rt, class_id))
+                  ? rt->class_array[class_id].finalizer : NULL;
+    if (finalizer)
+        (*finalizer)(rt, JS_MKPTR(JS_TAG_OBJECT, p));
+
+    // The stub may be on `gc_zero_ref_count_list` (freed from `free_zero_refcount`) or on
+    // `tmp_obj_list` (freed while removing cycles); unlink it before either freeing it or
+    // re-adding it below, as `free_object` does.
+    remove_gc_object(&p->header);
+
+    if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES && js_rc(p)->ref_count != 0) {
+        list_add_tail(&p->header.link, &rt->gc_zero_ref_count_list);
+    } else {
+        js_free_rt(rt, p);
+    }
+}
+
 static void free_gc_object(JSRuntime *rt, JSGCObjectHeader *gp)
 {
     switch(js_rc(gp)->gc_obj_type) {
@@ -6663,6 +6787,9 @@ static void free_gc_object(JSRuntime *rt, JSGCObjectHeader *gp)
         break;
     case JS_GC_OBJ_TYPE_MODULE:
         js_free_module_def(rt, (JSModuleDef *)gp);
+        break;
+    case JS_GC_OBJ_TYPE_DOM_STUB:
+        free_dom_stub(rt, (JSDomStub *)gp);
         break;
     default:
         abort();
@@ -6940,6 +7067,19 @@ static void mark_children(JSRuntime *rt, JSGCObjectHeader *gp,
             js_mark_module_def(rt, m, mark_func);
         }
         break;
+    case JS_GC_OBJ_TYPE_DOM_STUB:
+        {
+            JSDomStub *p = (JSDomStub *)gp;
+            JSClassGCMark *gc_mark;
+            JSClassID class_id = dom_stub_class_id(rt, p);
+            /* Servo: mark a stub with the gc_mark of its interface's class, registered when the
+               DOM node was wrapped. */
+            gc_mark = JS_IsRegisteredClass(rt, class_id)
+                        ? rt->class_array[class_id].gc_mark : NULL;
+            if (gc_mark)
+                gc_mark(rt, JS_MKPTR(JS_TAG_OBJECT, p), mark_func);
+        }
+        break;
     default:
         abort();
     }
@@ -7049,6 +7189,7 @@ static void gc_free_cycles(JSRuntime *rt)
         case JS_GC_OBJ_TYPE_FUNCTION_BYTECODE:
         case JS_GC_OBJ_TYPE_ASYNC_FUNCTION:
         case JS_GC_OBJ_TYPE_MODULE:
+        case JS_GC_OBJ_TYPE_DOM_STUB:
 #ifdef DUMP_GC_FREE
             if (!header_done) {
                 printf("Freeing cycles:\n");
@@ -7072,7 +7213,8 @@ static void gc_free_cycles(JSRuntime *rt)
         assert(js_rc(p)->gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT ||
                js_rc(p)->gc_obj_type == JS_GC_OBJ_TYPE_FUNCTION_BYTECODE ||
                js_rc(p)->gc_obj_type == JS_GC_OBJ_TYPE_ASYNC_FUNCTION ||
-               js_rc(p)->gc_obj_type == JS_GC_OBJ_TYPE_MODULE);
+               js_rc(p)->gc_obj_type == JS_GC_OBJ_TYPE_MODULE ||
+               js_rc(p)->gc_obj_type == JS_GC_OBJ_TYPE_DOM_STUB);
         if (js_rc(p)->gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT &&
             ((JSObject *)p)->weakref_count != 0) {
             /* keep the object because there are weak references to it */
@@ -7308,7 +7450,13 @@ void JS_ComputeMemoryUsage(JSRuntime *rt, JSMemoryUsage *s)
         JSShapeProperty *prs;
 
         /* XXX: could count the other GC object types too */
-        if (js_rc(gp)->gc_obj_type == JS_GC_OBJ_TYPE_FUNCTION_BYTECODE) {
+        if (js_rc(gp)->gc_obj_type == JS_GC_OBJ_TYPE_DOM_STUB) {
+            s->dom_stub_count++;
+            /* Servo: count the stub itself, like `obj_size` counts only sizeof(JSObject).
+               The allocation header is reflected in `malloc_size`. */
+            s->dom_stub_size += sizeof(JSDomStub);
+            continue;
+        } else if (js_rc(gp)->gc_obj_type == JS_GC_OBJ_TYPE_FUNCTION_BYTECODE) {
             compute_bytecode_size((JSFunctionBytecode *)gp, hp);
             continue;
         } else if (js_rc(gp)->gc_obj_type != JS_GC_OBJ_TYPE_JS_OBJECT) {
@@ -7526,13 +7674,16 @@ void JS_ComputeMemoryUsage(JSRuntime *rt, JSMemoryUsage *s)
     s->js_func_code_size = mem.js_func_code_size;
     s->js_func_pc2line_count = mem.js_func_pc2line_count;
     s->js_func_pc2line_size = mem.js_func_pc2line_size;
+    /* Servo: DOM stubs are GC objects too, but the upstream sum omits them. */
     s->memory_used_count += round(mem.memory_used_count) +
         s->atom_count + s->str_count +
         s->obj_count + s->shape_count +
-        s->js_func_count + s->js_func_pc2line_count;
+        s->js_func_count + s->js_func_pc2line_count +
+        s->dom_stub_count;
     s->memory_used_size += s->atom_size + s->str_size +
         s->obj_size + s->prop_size + s->shape_size +
-        s->js_func_size + s->js_func_code_size + s->js_func_pc2line_size;
+        s->js_func_size + s->js_func_code_size + s->js_func_pc2line_size +
+        s->dom_stub_size;
 }
 
 void JS_DumpMemoryUsage(FILE *fp, const JSMemoryUsage *s, JSRuntime *rt)
@@ -8585,6 +8736,8 @@ JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
     JSProperty *pr;
     JSShapeProperty *prs;
     uint32_t tag;
+
+    assert(!JS_IsDomStub(obj));
 
     tag = JS_VALUE_GET_TAG(obj);
     if (unlikely(tag != JS_TAG_OBJECT)) {
@@ -11426,6 +11579,10 @@ void *JS_GetOpaque(JSValueConst obj, JSClassID class_id)
     if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
         return NULL;
     p = JS_VALUE_GET_OBJ(obj);
+    /* Servo: a JSDomStub has no opaque (`ObjectData`); its fields are read through
+       `JS_GetDomStub*` instead. */
+    if (js_rc(p)->gc_obj_type == JS_GC_OBJ_TYPE_DOM_STUB)
+        return NULL;
     if (p->class_id != class_id)
         return NULL;
     return p->u.opaque;
@@ -14963,6 +15120,9 @@ static __maybe_unused void JS_DumpGCObject(JSRuntime *rt, JSGCObjectHeader *p)
             break;
         case JS_GC_OBJ_TYPE_MODULE:
             printf("[module]");
+            break;
+        case JS_GC_OBJ_TYPE_DOM_STUB:
+            printf("[dom_stub]");
             break;
         default:
             printf("[unknown %d]", js_rc(p)->gc_obj_type);

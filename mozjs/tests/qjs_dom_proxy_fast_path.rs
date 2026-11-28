@@ -238,7 +238,11 @@ fn unshadowed_names_resolve_on_the_prototype() {
 
         // Prototype accessors and data, with the proxy as receiver: no trap.
         let before = traps();
-        eval_true(cx, global, "o.acc === o && o.d === 'proto' && o.named2 === 'proto' && typeof o.toString === 'function'");
+        eval_true(
+            cx,
+            global,
+            "o.acc === o && o.d === 'proto' && o.named2 === 'proto' && typeof o.toString === 'function'",
+        );
         eval_true(cx, global, "o.s = 7; log.join() === '7,true'");
         assert_eq!(traps(), before);
 
@@ -252,8 +256,16 @@ fn unshadowed_names_resolve_on_the_prototype() {
 
         // An expando shadows the prototype.
         eval_true(cx, global, "o.x = 1; o.x === 1");
-        eval_true(cx, global, "Object.defineProperty(o, 'd', { value: 'expando', configurable: true }); o.d === 'expando'");
-        eval_true(cx, global, "Object.defineProperty(o, 's', { value: 0, writable: true, configurable: true }); o.s = 8; o.s === 8 && log.length === 2");
+        eval_true(
+            cx,
+            global,
+            "Object.defineProperty(o, 'd', { value: 'expando', configurable: true }); o.d === 'expando'",
+        );
+        eval_true(
+            cx,
+            global,
+            "Object.defineProperty(o, 's', { value: 0, writable: true, configurable: true }); o.s = 8; o.s === 8 && log.length === 2",
+        );
 
         // Cached prototype lookups see every change to the prototype chain.
         set_global(cx, global, "P", ObjectValue(proto.get()));
@@ -274,17 +286,29 @@ fn unshadowed_names_resolve_on_the_prototype() {
         );
         eval_true(cx, global, "Object.prototype.yy = 3; o.yy === 3");
         eval_true(cx, global, "delete Object.prototype.yy; o.yy === undefined");
-        eval_true(cx, global, "const old = Object.getPrototypeOf(P); const r0 = o.ww === undefined && o.named1 === 1; \
+        eval_true(
+            cx,
+            global,
+            "const old = Object.getPrototypeOf(P); const r0 = o.ww === undefined && o.named1 === 1; \
             Object.setPrototypeOf(P, { ww: 1, named1: 'q' }); const r1 = o.ww === 1 && o.named1 === 'q'; \
-            Object.setPrototypeOf(P, old); r0 && r1 && o.ww === undefined && o.named1 === 1");
-        eval_true(cx, global, "Object.defineProperty(Object.prototype, 'vv', { get() { return this; }, configurable: true }); \
-            const r2 = o.vv === o; delete Object.prototype.vv; r2 && o.vv === undefined");
+            Object.setPrototypeOf(P, old); r0 && r1 && o.ww === undefined && o.named1 === 1",
+        );
+        eval_true(
+            cx,
+            global,
+            "Object.defineProperty(Object.prototype, 'vv', { get() { return this; }, configurable: true }); \
+            const r2 = o.vv === o; delete Object.prototype.vv; r2 && o.vv === undefined",
+        );
 
         // An exotic object in the chain: the traps look the name up, once.
-        eval_true(cx, global, "const hasLog = []; const old2 = Object.getPrototypeOf(P); \
+        eval_true(
+            cx,
+            global,
+            "const hasLog = []; const old2 = Object.getPrototypeOf(P); \
             Object.setPrototypeOf(P, new Proxy({ pp: 1 }, { has(t, k) { hasLog.push(k); return k in t; } })); \
             const r3 = o.qq === undefined && o.pp === 1 && hasLog.join() === 'qq,pp' && o.acc === o; \
-            Object.setPrototypeOf(P, old2); r3 && hasLog.length === 2");
+            Object.setPrototypeOf(P, old2); r3 && hasLog.length === 2",
+        );
 
         // Array indices on the prototype go to the traps, which try the indexed getter first.
         eval_true(cx, global, "P['3000000000'] = 'pi'; P['01'] = 'p01'; true");

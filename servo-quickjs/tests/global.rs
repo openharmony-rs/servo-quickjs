@@ -111,7 +111,10 @@ fn global_class_and_global_this() {
             ctx,
             "var a = 1; let b = 2; function f() { return a + b; } f() === 3"
         ));
-        assert!(eval_bool(ctx, "a = 5; globalThis.a === 5 && Object.getOwnPropertyDescriptor(globalThis, 'a').value === 5"));
+        assert!(eval_bool(
+            ctx,
+            "a = 5; globalThis.a === 5 && Object.getOwnPropertyDescriptor(globalThis, 'a').value === 5"
+        ));
         assert!(eval_bool(
             ctx,
             "delete globalThis.c; c = 3; c === 3 && 'c' in globalThis"

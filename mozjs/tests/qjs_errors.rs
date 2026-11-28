@@ -430,7 +430,11 @@ foo();";
         global,
         "stack === 'baz@stack.js:5:12\\nbar@stack.js:7:8\\nfoo@stack.js:9:6\\n@stack.js:12:4\\n'"
     ));
-    assert!(eval_bool(cx, global, "v8Stack.split('\\n')[0] === '    at baz (stack.js:5:12)' && v8Stack.split('\\n')[3] === '    at stack.js:12:4'"));
+    assert!(eval_bool(
+        cx,
+        global,
+        "v8Stack.split('\\n')[0] === '    at baz (stack.js:5:12)' && v8Stack.split('\\n')[3] === '    at stack.js:12:4'"
+    ));
     assert!(eval_bool(
         cx,
         global,

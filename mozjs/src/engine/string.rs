@@ -1592,7 +1592,7 @@ unsafe fn value_to_source(
     match v.tag() {
         q::JS_TAG_UNDEFINED => push_str(out, "(void 0)"),
         q::JS_TAG_STRING | q::JS_TAG_STRING_ROPE => {
-            return with_string_chars(cx, v, |c| push_quoted(out, c))
+            return with_string_chars(cx, v, |c| push_quoted(out, c));
         }
         q::JS_TAG_FLOAT64 if v.float64() == 0.0 && v.float64().is_sign_negative() => {
             push_str(out, "-0")

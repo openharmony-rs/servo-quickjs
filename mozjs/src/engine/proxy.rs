@@ -966,7 +966,7 @@ unsafe extern "C" fn proxy_get_property(
 ) -> q::JSValue {
     match unshadowed(ctx, obj, atom) {
         Unshadowed::Proto(proto) => {
-            return q::JS_GetPropertyInternal(ctx, proto, atom, receiver, 0)
+            return q::JS_GetPropertyInternal(ctx, proto, atom, receiver, 0);
         }
         Unshadowed::Exception => return q::JS_EXCEPTION,
         Unshadowed::No => {}

@@ -939,7 +939,10 @@ unsafe fn number_state(
                 "min2" => Grouping::Min2,
                 "" => Grouping::Off,
                 s => {
-                    return throw_range(ctx, &format!("invalid value {s:?} for option useGrouping"))
+                    return throw_range(
+                        ctx,
+                        &format!("invalid value {s:?} for option useGrouping"),
+                    );
                 }
             }
         }
@@ -1025,7 +1028,7 @@ unsafe fn number_state(
             return throw_range(
                 ctx,
                 "minimumFractionDigits is greater than maximumFractionDigits",
-            )
+            );
         }
         (Some(min), Some(max)) => (min, max),
     };
@@ -1991,7 +1994,7 @@ unsafe extern "C" fn number_to_locale_string(
             return ret(throw_type(
                 ctx,
                 "Number.prototype.toLocaleString called on an incompatible receiver",
-            ))
+            ));
         }
     };
     ret(number_state(ctx, arg(argc, argv, 0), arg(argc, argv, 1))

@@ -96,6 +96,17 @@ pub(crate) fn realm_of_global(global: *mut root::JSObject) -> *mut RealmData {
 
 /// The realm of `obj`: exact for globals, otherwise derived from the function or prototype chain
 /// (QuickJS objects do not record their realm), falling back to the current realm.
+/// The shim context (`Cx`) that owns `realm`, recovered through its QuickJS runtime.
+pub(crate) unsafe fn context_of_realm(realm: *mut RealmData) -> *mut root::JSContext {
+    let qctx = (*realm).qctx;
+    assert!(!qctx.is_null());
+    let rt = q::JS_GetRuntime(qctx);
+    // The runtime opaque is the `Cx` (see `runtime.rs`), which the shim uses as `JSContext*`.
+    let cx = q::JS_GetRuntimeOpaque(rt) as *const Cx;
+    assert!(!cx.is_null());
+    (*cx).as_raw()
+}
+
 pub(crate) fn realm_of_object(cx: &Cx, obj: *mut root::JSObject) -> *mut RealmData {
     let realm = realm_of_global(obj);
     if !realm.is_null() {

@@ -269,8 +269,7 @@ fn run(source: &str, followup: &str) -> (bool, String) {
 }
 
 /// After the route, script still runs in the runtime: exceptions are caught and jobs run.
-const FOLLOWUP: &str =
-    "try { fail(); } catch (e) { log.push('caught'); } Promise.resolve().then(() => log.push('job'));";
+const FOLLOWUP: &str = "try { fail(); } catch (e) { log.push('caught'); } Promise.resolve().then(() => log.push('job'));";
 
 fn with_followup(log: &str) -> String {
     if log.is_empty() {

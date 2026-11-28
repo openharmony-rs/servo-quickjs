@@ -395,7 +395,7 @@ impl Writer {
             let mut info = q::JSBufferInfo::default();
             match q::JS_GetBufferInfo(item.v, &mut info) {
                 q::JS_BUFFER_SHARED_ARRAY_BUFFER => {
-                    return self.report(root::JS_SCERR_SHMEM_TRANSFERABLE)
+                    return self.report(root::JS_SCERR_SHMEM_TRANSFERABLE);
                 }
                 q::JS_BUFFER_ARRAY_BUFFER => {}
                 _ => {
@@ -535,7 +535,7 @@ impl Writer {
             CLASS_MAP | CLASS_SET => self.start_map(v, class == CLASS_SET),
             CLASS_ERROR => self.start_error(v),
             CLASS_NUMBER | CLASS_STRING | CLASS_BOOLEAN | CLASS_BIG_INT | CLASS_DATE => {
-                return self.write_primitive_object(v, class)
+                return self.write_primitive_object(v, class);
             }
             CLASS_REGEXP => return self.write_regexp(v),
             _ => return self.write_other(v),

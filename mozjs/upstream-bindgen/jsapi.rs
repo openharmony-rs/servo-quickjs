@@ -18951,6 +18951,36 @@ pub mod root {
         ) -> *mut root::JSObject;
     }
     extern "C" {
+        pub fn JS_NewDomStub(
+            cx: *mut JSContext,
+            clasp: *const JSClass,
+            dom_ptr: *mut ::std::os::raw::c_void,
+        ) -> *mut JSObject;
+    }
+    extern "C" {
+        pub fn JS_UnbindDomStub(
+            cx: *mut JSContext,
+            obj: *mut root::JSObject,
+        );
+    }
+    extern "C" {
+        pub fn JS_GetDomStubDomPtr(obj: *mut JSObject) -> *mut ::std::os::raw::c_void;
+    }
+    extern "C" {
+        pub fn JS_GetDomStubRefCount(stub: *mut root::JSObject) -> i32;
+        pub fn JS_GetDomStubPoolRefCount(stub: *mut root::JSObject) -> u32;
+    }
+    extern "C" {
+        pub fn JS_IsDomStub(obj: *mut JSObject) -> bool;
+    }
+    extern "C" {
+        pub fn JS_GetDomStubInfo(
+            stub: *mut root::JSObject,
+            global: *mut *mut root::JSObject,
+            cx: *mut *mut JSContext,
+        );
+    }
+    extern "C" {
         #[link_name = "\u{1}_Z12JS_NewObjectP9JSContextPK7JSClass"]
         pub fn JS_NewObject(
             cx: *mut root::JSContext,

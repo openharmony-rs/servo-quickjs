@@ -433,10 +433,16 @@ fn with_realm(f: impl FnOnce(&mut JSContext)) {
 #[test]
 fn module_graph() {
     add_sources(&[
-        ("root.js", "import { a, c } from './a.js';\nimport { b } from './b.js';\nexport const sum = a + b + c;\nexport const id = import.meta.id;\nexport const sameMeta = import.meta === import.meta;"),
+        (
+            "root.js",
+            "import { a, c } from './a.js';\nimport { b } from './b.js';\nexport const sum = a + b + c;\nexport const id = import.meta.id;\nexport const sameMeta = import.meta === import.meta;",
+        ),
         ("a.js", "export { c } from './c.js';\nexport const a = 1;"),
         ("b.js", "export const b = 2;"),
-        ("c.js", "export const c = 4;\nexport const metaId = import.meta.id;\nexport const metaUrl = import.meta.url;\nexport const keys = Object.keys(import.meta).join();\nexport const caller = callerId();"),
+        (
+            "c.js",
+            "export const c = 4;\nexport const metaId = import.meta.id;\nexport const metaUrl = import.meta.url;\nexport const keys = Object.keys(import.meta).join();\nexport const caller = callerId();",
+        ),
     ]);
     with_realm(|cx| unsafe {
         let root_url = url("root.js");
@@ -540,9 +546,18 @@ fn import_meta_after_record_freed() {
 #[test]
 fn cyclic_imports() {
     add_sources(&[
-        ("main.js", "import { getB } from './a.js';\nexport const result = getB();"),
-        ("a.js", "import { b } from './b.js';\nexport const a = 1;\nexport function getB() { return b; }"),
-        ("b.js", "import { a } from './a.js';\nexport const b = 2;\nexport function getA() { return a; }"),
+        (
+            "main.js",
+            "import { getB } from './a.js';\nexport const result = getB();",
+        ),
+        (
+            "a.js",
+            "import { b } from './b.js';\nexport const a = 1;\nexport function getB() { return b; }",
+        ),
+        (
+            "b.js",
+            "import { a } from './a.js';\nexport const b = 2;\nexport function getA() { return a; }",
+        ),
     ]);
     with_realm(|cx| unsafe {
         rooted!(&in(cx) let root = load_graph(cx, &url("main.js")));
@@ -699,11 +714,12 @@ fn top_level_await_rejection_is_reported() {
         assert_eq!(promise_state(promise.get()), qjs::JS_PROMISE_REJECTED);
         assert_eq!(REPORTED.with(|r| r.borrow().clone()), [5]);
         // Reported, not an unhandled rejection.
-        assert!(LOADER.with(|l| l
-            .borrow()
-            .rejections
-            .iter()
-            .all(|&(p, handled)| p != promise.get() as *mut c_void || handled)));
+        assert!(LOADER.with(|l| {
+            l.borrow()
+                .rejections
+                .iter()
+                .all(|&(p, handled)| p != promise.get() as *mut c_void || handled)
+        }));
     });
 }
 
@@ -968,7 +984,10 @@ fn async_module_does_not_look_up_constructor() {
 #[test]
 fn json_modules() {
     add_sources(&[
-        ("main.js", "import data from './data.json' with { type: 'json' };\nexport const second = data.list[1];\nexport { default as raw } from './data.json' with { type: 'json' };"),
+        (
+            "main.js",
+            "import data from './data.json' with { type: 'json' };\nexport const second = data.list[1];\nexport { default as raw } from './data.json' with { type: 'json' };",
+        ),
         ("data.json", "{ \"list\": [10, 20, 30] }"),
     ]);
     with_realm(|cx| unsafe {
@@ -1079,10 +1098,7 @@ fn import_attributes() {
             "main.js",
             "import a from './a.js' with { type: 'css' };\nimport c from './c.js' with { type: 'json' };\nimport t from './t.txt' with { type: 'text' };\nimport x from './x.js' with { type: 'x' };",
         ),
-        (
-            "bad.js",
-            "import b from './b.js' with { foo: 'bar' };",
-        ),
+        ("bad.js", "import b from './b.js' with { foo: 'bar' };"),
     ]);
     with_realm(|cx| unsafe {
         let options = CompileOptionsWrapper::new(cx, c"https://test/main.js".to_owned(), 1);
@@ -1191,7 +1207,13 @@ fn dynamic_import() {
 
         // From a classic script, with its script private.
         let options = CompileOptionsWrapper::new(cx, c"https://test/classic.js".to_owned(), 1);
-        let script = mozjs::rust::wrappers2::Compile1(cx, options.ptr, &mut transform_str_to_source_text("globalThis.p = import('./from-classic.js');\nglobalThis.classicCaller = callerId();"));
+        let script = mozjs::rust::wrappers2::Compile1(
+            cx,
+            options.ptr,
+            &mut transform_str_to_source_text(
+                "globalThis.p = import('./from-classic.js');\nglobalThis.classicCaller = callerId();",
+            ),
+        );
         assert!(!script.is_null());
         let private = PrivateValue(77 as *const c_void);
         jsapi::SetScriptPrivate(script, &private);

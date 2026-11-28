@@ -199,7 +199,11 @@ fn unreachable_globals_are_freed() {
             rooted!(&in(cx) let global = new_global(cx, principals));
             JS_DropPrincipals(cx.raw_cx(), principals);
             // Cycles through the global: functions, closures and objects of the realm.
-            eval_true(cx, global.handle(), "var self = this; function f() { return self; } var o = { f, g: globalThis, h: () => o }; f() === this");
+            eval_true(
+                cx,
+                global.handle(),
+                "var self = this; function f() { return self; } var o = { f, g: globalThis, h: () => o }; f() === this",
+            );
         }
         assert_eq!(realm_count(), baseline + GLOBALS);
         assert_eq!(count(&FINALIZED), 0);
@@ -223,7 +227,11 @@ fn reachable_function_keeps_its_realm() {
             rooted!(&in(cx) let b = b.get());
             rooted!(&in(cx) let a = new_global(cx, ptr::null_mut()));
             EXPECTED_REALM.with(|r| r.set(GetObjectRealmOrNull(a.get())));
-            let f = eval(cx, a.handle(), "var secret = 'A'; function f() { return secret + ':' + (globalThis.secret === 'A'); } f");
+            let f = eval(
+                cx,
+                a.handle(),
+                "var secret = 'A'; function f() { return secret + ':' + (globalThis.secret === 'A'); } f",
+            );
             set_global(cx, b.handle(), c"scripted", f);
             let mut realm = AutoRealm::new_from_handle(cx, a.handle());
             let cx = &mut *realm;

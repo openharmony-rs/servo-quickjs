@@ -315,10 +315,68 @@ pub(crate) unsafe fn JS_SetAllNonReservedSlotsToUndefined(obj: root::JS::HandleO
 
 // Memory reporting.
 
-unsafe fn malloc_size(cx: &Cx) -> usize {
+/// Fills in a fresh `JSMemoryUsage` by walking every GC object and property array of the
+/// runtime. Each call is a full traversal; callers must not cache the result across calls.
+pub(crate) unsafe fn memory_usage(cx: &Cx) -> MemoryUsage {
     let mut usage: q::JSMemoryUsage = std::mem::zeroed();
     q::JS_ComputeMemoryUsage(cx.rt, &mut usage);
-    usage.malloc_size.max(0) as usize
+    MemoryUsage::from_qjs(usage)
+}
+
+/// A snapshot of `JSMemoryUsage` with the fields the memory-stats CSV records. Sizes are bytes;
+/// counts are numbers of objects/slots.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MemoryUsage {
+    pub obj_count: u64,
+    pub obj_size: u64,
+    pub dom_stub_count: u64,
+    pub dom_stub_size: u64,
+    pub prop_count: u64,
+    pub prop_size: u64,
+    pub memory_used_size: u64,
+    pub malloc_size: u64,
+}
+
+impl MemoryUsage {
+    /// Converts the C counters, clamping negative values (which the engine never produces) to 0.
+    pub(crate) fn from_qjs(u: q::JSMemoryUsage) -> Self {
+        Self {
+            obj_count: u.obj_count.max(0) as u64,
+            obj_size: u.obj_size.max(0) as u64,
+            dom_stub_count: u.dom_stub_count.max(0) as u64,
+            dom_stub_size: u.dom_stub_size.max(0) as u64,
+            prop_count: u.prop_count.max(0) as u64,
+            prop_size: u.prop_size.max(0) as u64,
+            memory_used_size: u.memory_used_size.max(0) as u64,
+            malloc_size: u.malloc_size.max(0) as u64,
+        }
+    }
+}
+
+/// The number of live DOM stubs and the bytes they occupy (each counted as `sizeof(JSDomStub)`;
+/// allocation headers are not included). Filled in by `JS_ComputeMemoryUsage`; exposed to
+/// embedders through `quickjs::dom_stub_usage`.
+pub(crate) unsafe fn dom_stub_usage(cx: &Cx) -> (usize, usize) {
+    let usage = memory_usage(cx);
+    (
+        usage.dom_stub_count.max(0) as usize,
+        usage.dom_stub_size.max(0) as usize,
+    )
+}
+
+unsafe fn malloc_size(cx: &Cx) -> usize {
+    memory_usage(cx).malloc_size.max(0) as usize
+}
+
+/// The number of live JSObjects and the bytes they occupy (each counted as `sizeof(JSObject)`;
+/// property storage, shapes and strings are not included). Filled in by `JS_ComputeMemoryUsage`;
+/// exposed to embedders through `quickjs::obj_usage`.
+pub(crate) unsafe fn obj_usage(cx: &Cx) -> (usize, usize) {
+    let usage = memory_usage(cx);
+    (
+        usage.obj_count.max(0) as usize,
+        usage.obj_size.max(0) as usize,
+    )
 }
 
 pub(crate) unsafe fn GetGCHeapUsage(cx: *mut root::JSContext) -> u64 {

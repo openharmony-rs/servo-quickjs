@@ -489,8 +489,16 @@ fn dom_proxy_traps() {
 
         // Rejected definitions: silent in sloppy mode, TypeError in strict mode.
         eval_true(cx, global.handle(), "o.frozen = 1; o.frozen === undefined");
-        eval_true(cx, global.handle(), "(function() { 'use strict'; try { o.frozen = 1; } catch (e) { return e instanceof TypeError; } })()");
-        eval_true(cx, global.handle(), "try { Object.defineProperty(o, 'frozen', { value: 1 }); false } catch (e) { e instanceof TypeError }");
+        eval_true(
+            cx,
+            global.handle(),
+            "(function() { 'use strict'; try { o.frozen = 1; } catch (e) { return e instanceof TypeError; } })()",
+        );
+        eval_true(
+            cx,
+            global.handle(),
+            "try { Object.defineProperty(o, 'frozen', { value: 1 }); false } catch (e) { e instanceof TypeError }",
+        );
         eval_true(
             cx,
             global.handle(),
@@ -991,7 +999,11 @@ fn window_proxy_and_transplant() {
             g1.handle(),
             "(0, eval)('this') === globalThis && Object.getPrototypeOf(this) === Object.prototype",
         );
-        eval_true(cx, g1.handle(), "'a' in this && Object.keys(this).includes('a') && Object.getOwnPropertyDescriptor(this, 'a').value === 1");
+        eval_true(
+            cx,
+            g1.handle(),
+            "'a' in this && Object.keys(this).includes('a') && Object.getOwnPropertyDescriptor(this, 'a').value === 1",
+        );
         eval_true(
             cx,
             g1.handle(),
@@ -1179,7 +1191,11 @@ fn global_class_slots_trace_and_resolve() {
             global.handle(),
             "delete lazyThing && (function() { return lazyThing; })() === 42",
         );
-        eval_true(cx, global.handle(), "typeof notLazy === 'undefined' && Object.keys(this).filter(k => k === 'lazyThing').length === 0");
+        eval_true(
+            cx,
+            global.handle(),
+            "typeof notLazy === 'undefined' && Object.keys(this).filter(k => k === 'lazyThing').length === 0",
+        );
         // Deleting a property that wasn't resolved yet resolves it first, so it stays deleted.
         eval_true(
             cx,

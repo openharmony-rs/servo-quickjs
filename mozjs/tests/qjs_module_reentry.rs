@@ -234,11 +234,23 @@ unsafe fn root_record(cx: &mut JSContext, name: &str) -> *mut JSObject {
 #[test]
 fn mixed_sync_and_queued_graph() {
     add_sources(&[
-        ("root.js", "import './s_a.js'; import './b.js'; import './s_c.js'; export const r = 1;"),
-        ("s_a.js", "import './s_a.js'; import './b.js'; import './s_c.js'; import './root.js'; export const a = 1;"),
+        (
+            "root.js",
+            "import './s_a.js'; import './b.js'; import './s_c.js'; export const r = 1;",
+        ),
+        (
+            "s_a.js",
+            "import './s_a.js'; import './b.js'; import './s_c.js'; import './root.js'; export const a = 1;",
+        ),
         ("b.js", "import './s_d.js'; export const b = 1;"),
-        ("s_c.js", "import './s_d.js'; import './s_a.js'; export const c = 1;"),
-        ("s_d.js", "import './root.js'; import './b.js'; export const d = 1;"),
+        (
+            "s_c.js",
+            "import './s_d.js'; import './s_a.js'; export const c = 1;",
+        ),
+        (
+            "s_d.js",
+            "import './root.js'; import './b.js'; export const d = 1;",
+        ),
     ]);
     with_realm(|cx| unsafe {
         rooted!(&in(cx) let root = root_record(cx, "root.js"));

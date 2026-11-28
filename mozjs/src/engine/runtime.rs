@@ -6,7 +6,11 @@
 
 use std::cell::Cell;
 use std::ffi::{c_char, c_int, c_void};
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::{Mutex, OnceLock};
 
 use servo_quickjs as q;
 
@@ -57,7 +61,10 @@ pub(crate) unsafe fn JS_DestroyContext(raw: *mut root::JSContext) {
     }
     super::free_microtasks(cx);
     super::free_debuggers(cx);
+    // The last two rows of this runtime in the memory-stats CSV: before and after the pool drain.
+    append_memory_stats(cx);
     cx.drain_pool((0, 0));
+    append_memory_stats(cx);
     q::JS_FreeValueRT(cx.rt, cx.base_key_object.replace(q::JS_UNDEFINED));
     q::JS_FreeContext(cx.base_ctx);
     // Frees every object and realm (realms with their contexts, patch Q15).
@@ -70,6 +77,127 @@ pub(crate) unsafe fn JS_DestroyContext(raw: *mut root::JSContext) {
     super::verify::reset();
     super::forget_shared_rcs();
     drop(Box::from_raw(raw as *mut Cx));
+}
+
+const MEMORY_STATS_HEADER: &str =
+    "t_ms,obj_size,obj_count,dom_stub_size,dom_stub_count,prop_size,prop_count,memory_used_size,malloc_size,pool_count,pool_size\n";
+
+static MEMORY_STATS_LOCK: Mutex<()> = Mutex::new(());
+static MEMORY_STATS_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+static MEMORY_STATS_ANNOUNCED: OnceLock<()> = OnceLock::new();
+static MEMORY_STATS_ERROR_REPORTED: OnceLock<()> = OnceLock::new();
+
+/// The process start time, in milliseconds on the `/proc/uptime` clock.
+#[cfg(target_os = "linux")]
+fn process_start_ms() -> Option<u64> {
+    static START_MS: OnceLock<Option<u64>> = OnceLock::new();
+    *START_MS.get_or_init(|| {
+        let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+        // Field 22 (starttime) is the 20th token after the comm field. Split on the last ')'
+        // so a comm containing spaces or parentheses cannot shift fields.
+        let rest = stat.rsplit_once(')')?.1;
+        let start_ticks: u64 = rest.split_whitespace().nth(19)?.parse().ok()?;
+        // SAFETY: `sysconf` with a constant key is always safe to call.
+        let ticks_per_s = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+        if ticks_per_s <= 0 {
+            return None;
+        }
+        Some(start_ticks.saturating_mul(1000) / ticks_per_s as u64)
+    })
+}
+
+/// Milliseconds since this process started, on the same monotonic `/proc/uptime` clock that
+/// `.vscode/pss-sampler.sh` uses. `None` when `/proc` is unavailable.
+#[cfg(target_os = "linux")]
+fn process_ms() -> Option<u64> {
+    let uptime = std::fs::read_to_string("/proc/uptime").ok()?;
+    let uptime_s: f64 = uptime.split_whitespace().next()?.parse().ok()?;
+    let uptime_ms = (uptime_s * 1000.0) as u64;
+    Some(uptime_ms.saturating_sub(process_start_ms()?))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_ms() -> Option<u64> {
+    None
+}
+
+/// `$SERVO_MEMORY_STATS_PATH`, or `None` when it is not set. The memory-stats CSV is opt-in:
+/// without the environment variable nothing is collected and no file is created.
+fn memory_stats_path() -> Option<&'static Path> {
+    MEMORY_STATS_PATH
+        .get_or_init(|| std::env::var_os("SERVO_MEMORY_STATS_PATH").map(PathBuf::from))
+        .as_deref()
+}
+
+/// Appends one CSV row. Writes the header when the file is still empty, serializes writers
+/// within the process, and reports an I/O error only once.
+fn write_memory_stats_row(
+    path: &Path,
+    usage: super::MemoryUsage,
+    t_ms: Option<u64>,
+    pool_count: usize,
+    pool_size: usize,
+) {
+    let t = t_ms.map(|v| v.to_string()).unwrap_or_default();
+    let row = format!(
+        "{t},{obj_size},{obj_count},{dom_stub_size},{dom_stub_count},{prop_size},{prop_count},{memory_used_size},{malloc_size},{pool_count},{pool_size}\n",
+        obj_size = usage.obj_size,
+        obj_count = usage.obj_count,
+        dom_stub_size = usage.dom_stub_size,
+        dom_stub_count = usage.dom_stub_count,
+        prop_size = usage.prop_size,
+        prop_count = usage.prop_count,
+        memory_used_size = usage.memory_used_size,
+        malloc_size = usage.malloc_size,
+    );
+    if MEMORY_STATS_ANNOUNCED.set(()).is_ok() {
+        eprintln!("memory-stats: writing {}", path.display());
+    }
+    let _guard = MEMORY_STATS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let result = (|| -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+        if file.metadata()?.len() == 0 {
+            file.write_all(MEMORY_STATS_HEADER.as_bytes())?;
+        }
+        file.write_all(row.as_bytes())
+    })();
+    if let Err(error) = result {
+        if MEMORY_STATS_ERROR_REPORTED.set(()).is_ok() {
+            eprintln!("memory-stats: cannot write {}: {error}", path.display());
+        }
+    }
+}
+
+/// Appends one row with `cx`'s current memory usage to `$SERVO_MEMORY_STATS_PATH`: the
+/// JSObject, Property and DOM stub sizes/counts, `memory_used_size`, `malloc_size`, and the
+/// number and size of values in the Rust-side autorelease pool. When the environment variable
+/// is not set, nothing is collected, no file is created and this function returns immediately.
+///
+/// `t_ms` is milliseconds since process start on the same monotonic `/proc/uptime` clock as
+/// `pss-sampler.sh`; it is written as an empty column when `/proc` is unavailable.
+///
+/// Every call runs one fresh `JS_ComputeMemoryUsage`, an O(live objects) traversal. The call
+/// creates no QuickJS heap objects and does not trigger a GC. `JS_DestroyContext` calls it
+/// before and after draining the pool (the last two rows of a runtime; the pool is empty in the
+/// second), and `runtime.memory_stats()` exposes it to pages.
+pub(crate) fn append_memory_stats(cx: &Cx) {
+    // Opt-in: skip the heap walk entirely unless the embedder asked for the CSV.
+    let Some(path) = memory_stats_path() else {
+        return;
+    };
+    // Capture the time and pool size first, then walk the heap: the row is timestamped at the
+    // sample point, not after the (potentially long) `JS_ComputeMemoryUsage`.
+    let t_ms = process_ms();
+    let pool_count = cx.pool.len();
+    let pool_size = pool_count * std::mem::size_of::<q::JSValue>();
+    // SAFETY: `cx` is the live runtime of this thread.
+    let usage = unsafe { super::memory_usage(cx) };
+    write_memory_stats_row(path, usage, t_ms, pool_count, pool_size);
 }
 
 pub(crate) unsafe fn JS_GetRuntime(cx: *mut root::JSContext) -> *mut root::JSRuntime {

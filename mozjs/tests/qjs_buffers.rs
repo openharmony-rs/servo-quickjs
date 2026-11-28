@@ -431,7 +431,11 @@ fn views_with_offsets(cx: &mut JSContext, global: HandleObject) {
         *data.add(1) = 0xaa;
     }
     set_global(cx, global, c"dv", dv.get());
-    assert_js(cx, global, "dv instanceof DataView && dv.getUint8(0) === 2 && dv.getUint8(1) === 0xaa && new Uint8Array(buf)[3] === 0xaa");
+    assert_js(
+        cx,
+        global,
+        "dv instanceof DataView && dv.getUint8(0) === 2 && dv.getUint8(1) === 0xaa && new Uint8Array(buf)[3] === 0xaa",
+    );
 
     rooted!(&in(cx) let dv2 = eval_obj(cx, global, "new DataView(buf, 12)"));
     unsafe {

@@ -392,7 +392,11 @@ fn wrappers_dates_and_regexps() {
             global,
             "out[0] instanceof Number && Object.is(out[0].valueOf(), -0)",
         );
-        check(cx, global, "out[1] instanceof String && out[1].valueOf() === input[1].valueOf() && out[1].length === 3");
+        check(
+            cx,
+            global,
+            "out[1] instanceof String && out[1].valueOf() === input[1].valueOf() && out[1].length === 3",
+        );
         check(
             cx,
             global,
@@ -413,7 +417,11 @@ fn wrappers_dates_and_regexps() {
             global,
             "out[5] instanceof Date && isNaN(out[5].getTime())",
         );
-        check(cx, global, "out[6] instanceof RegExp && out[6].source === input[6].source && out[6].flags === 'dgimsy'");
+        check(
+            cx,
+            global,
+            "out[6] instanceof RegExp && out[6].source === input[6].source && out[6].flags === 'dgimsy'",
+        );
         check(
             cx,
             global,
@@ -428,7 +436,11 @@ fn wrappers_dates_and_regexps() {
              Object.defineProperty(RegExp.prototype, 'flags', { get() { throw 3 } });
              [new Number(5), new Date(5), /x/g]",
         );
-        check(cx, global, "Number.prototype.toFixed.call(out[0], 0) === '5' && Date.prototype.toISOString.call(out[1]).endsWith('.005Z') && out[2].global");
+        check(
+            cx,
+            global,
+            "Number.prototype.toFixed.call(out[0], 0) === '5' && Date.prototype.toISOString.call(out[1]).endsWith('.005Z') && out[2].global",
+        );
     });
 }
 
@@ -558,9 +570,21 @@ fn buffers_and_views() {
                       Float16Array, BigUint64Array].map(C => new C(2)),
                 resizable: new ArrayBuffer(4, { maxByteLength: 64 }), empty: new ArrayBuffer(0) })",
         );
-        check(cx, global, "out.b instanceof ArrayBuffer && out.b.byteLength === 16 && new Uint8Array(out.b)[15] === 16");
-        check(cx, global, "out.u8.buffer === out.b && out.u8.byteOffset === 4 && out.u8.length === 8 && out.u8[0] === 5");
-        check(cx, global, "out.dv.buffer === out.b && out.dv.byteOffset === 2 && out.dv.byteLength === 4 && out.dv.getUint8(0) === 3");
+        check(
+            cx,
+            global,
+            "out.b instanceof ArrayBuffer && out.b.byteLength === 16 && new Uint8Array(out.b)[15] === 16",
+        );
+        check(
+            cx,
+            global,
+            "out.u8.buffer === out.b && out.u8.byteOffset === 4 && out.u8.length === 8 && out.u8[0] === 5",
+        );
+        check(
+            cx,
+            global,
+            "out.dv.buffer === out.b && out.dv.byteOffset === 2 && out.dv.byteLength === 4 && out.dv.getUint8(0) === 3",
+        );
         check(
             cx,
             global,
@@ -576,7 +600,11 @@ fn buffers_and_views() {
             global,
             "out.all.every((a, i) => a.constructor === input.all[i].constructor && a.length === 2)",
         );
-        check(cx, global, "out.resizable.resizable && out.resizable.maxByteLength === 64 && out.resizable.byteLength === 4");
+        check(
+            cx,
+            global,
+            "out.resizable.resizable && out.resizable.maxByteLength === 64 && out.resizable.byteLength === 4",
+        );
         check(cx, global, "out.empty.byteLength === 0 && !out.b.resizable");
         // The source is unchanged: buffers are copied, not shared.
         check(
@@ -604,16 +632,36 @@ fn errors() {
             global,
             "Object.getPrototypeOf(out[0]) === TypeError.prototype && out[0].message === 'msg'",
         );
-        check(cx, global, "out[0].cause.why === 1 && !Object.getOwnPropertyDescriptor(out[0], 'message').enumerable");
-        check(cx, global, "out[1] instanceof RangeError && !out[1].hasOwnProperty('message') && !('extra' in out[1])");
-        check(cx, global, "Object.getPrototypeOf(out[2]) === Error.prototype && out[2].message === 'custom' && out[2].name === 'Error'");
+        check(
+            cx,
+            global,
+            "out[0].cause.why === 1 && !Object.getOwnPropertyDescriptor(out[0], 'message').enumerable",
+        );
+        check(
+            cx,
+            global,
+            "out[1] instanceof RangeError && !out[1].hasOwnProperty('message') && !('extra' in out[1])",
+        );
+        check(
+            cx,
+            global,
+            "Object.getPrototypeOf(out[2]) === Error.prototype && out[2].message === 'custom' && out[2].name === 'Error'",
+        );
         check(
             cx,
             global,
             "out[3] instanceof EvalError && out[3].message === '42'",
         );
-        check(cx, global, "out[4] instanceof URIError && out[5] instanceof SyntaxError && out[6] instanceof ReferenceError");
-        check(cx, global, "out[7] instanceof AggregateError && out[7].errors[0] === 1 && out[7].errors[1].message === 'inner'");
+        check(
+            cx,
+            global,
+            "out[4] instanceof URIError && out[5] instanceof SyntaxError && out[6] instanceof ReferenceError",
+        );
+        check(
+            cx,
+            global,
+            "out[7] instanceof AggregateError && out[7].errors[0] === 1 && out[7].errors[1].message === 'inner'",
+        );
         check(
             cx,
             global,

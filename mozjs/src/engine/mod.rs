@@ -12,7 +12,8 @@
 // A `&mut` handed out from a shared reference (`&Cx`) aliases: see HACKING.md, "Re-entrancy".
 #![deny(clippy::mut_from_ref)]
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::ptr;
 
@@ -109,6 +110,65 @@ pub(crate) struct RealmData {
 
 thread_local!(static CURRENT: Cell<*const Cx> = const { Cell::new(ptr::null()) });
 
+thread_local! {
+    /// How many autorelease-pool entries currently keep a `JSDomStub` alive, keyed by the
+    /// stub's object pointer.
+    ///
+    /// Materialization transfers the stub's non-pool references to the new `JSObject` and
+    /// releases the stub's non-pool references. It needs this count to tell the two apart.
+    static DOM_STUB_POOL_REFS: RefCell<HashMap<usize, u32>> = RefCell::new(HashMap::new());
+}
+
+#[inline]
+fn object_key(v: q::JSValue) -> Option<usize> {
+    (v.tag() == q::JS_TAG_OBJECT).then_some(v.ptr() as usize)
+}
+
+#[inline]
+unsafe fn note_dom_stub_pool_push(v: q::JSValue) {
+    if !unsafe { is_dom_stub(v) } {
+        return;
+    }
+    let key = v.ptr() as usize;
+    DOM_STUB_POOL_REFS.with(|refs| {
+        *refs.borrow_mut().entry(key).or_default() += 1;
+    });
+}
+
+#[inline]
+fn note_dom_stub_pool_pop(v: q::JSValue) {
+    if !unsafe { is_dom_stub(v) } {
+        return;
+    }
+    let key = v.ptr() as usize;
+    DOM_STUB_POOL_REFS.with(|refs| {
+        let mut refs = refs.borrow_mut();
+        if refs.is_empty() {
+            return;
+        }
+        let Some(count) = refs.get_mut(&key) else {
+            return;
+        };
+        assert!(*count > 0);
+        *count -= 1;
+        if *count == 0 {
+            refs.remove(&key);
+        }
+    });
+}
+
+pub(crate) unsafe fn dom_stub_pool_ref_count(stub: *mut root::JSObject) -> u32 {
+    let key = object_key(obj_val(stub)).expect("pool count requested for a non-object");
+    DOM_STUB_POOL_REFS.with(|refs| refs.borrow().get(&key).copied().unwrap_or(0))
+}
+
+pub(crate) fn forget_dom_stub_pool_refs(stub: *mut root::JSObject) {
+    let key = object_key(obj_val(stub)).expect("pool refs requested for a non-object");
+    DOM_STUB_POOL_REFS.with(|refs| {
+        refs.borrow_mut().remove(&key);
+    });
+}
+
 impl Cx {
     pub fn from_raw<'a>(cx: *mut root::JSContext) -> &'a Cx {
         assert!(!cx.is_null());
@@ -187,6 +247,8 @@ impl Cx {
     #[cfg_attr(qjs_pool_stats, track_caller)]
     #[cfg_attr(not(qjs_pool_stats), allow(unused_variables))]
     fn push_pool(&self, qv: q::JSValue, pooled: Pooled) {
+        // SAFETY: `qv` is a value being retained by this runtime's autorelease pool.
+        unsafe { note_dom_stub_pool_push(qv) };
         self.pool.push(qv);
         verify::pooled(qv, 1);
         #[cfg(qjs_pool_stats)]
@@ -203,6 +265,7 @@ impl Cx {
     pub fn drain_pool(&self, mark: (usize, usize)) {
         while self.pool.len() > mark.0 {
             let v = self.pool.pop().unwrap();
+            note_dom_stub_pool_pop(v);
             #[cfg(qjs_pool_stats)]
             pool_stats::popped(v);
             verify::pooled(v, -1);
@@ -311,6 +374,18 @@ pub(crate) unsafe fn retain_object(obj: *mut root::JSObject) {
     verify::count(obj_val(obj), 1);
 }
 
+/// See `crate::quickjs::retain_object_count`.
+#[inline]
+pub(crate) unsafe fn retain_object_count(obj: *mut root::JSObject, count: u32) {
+    if count == 0 {
+        return;
+    }
+    let count = i32::try_from(count).expect("reference count increment exceeds i32::MAX");
+    let v = obj_val(obj);
+    q::JS_DupValueRTCount(current().rt, v, count);
+    verify::count(v, i64::from(count));
+}
+
 /// See `crate::quickjs::release_object`.
 #[inline]
 pub(crate) unsafe fn release_object(obj: *mut root::JSObject) {
@@ -330,12 +405,47 @@ pub(crate) unsafe fn release_object(obj: *mut root::JSObject) {
     }
 }
 
+/// See `crate::quickjs::release_dom_stub_count`.
+#[inline]
+pub(crate) unsafe fn release_dom_stub_count(obj: *mut root::JSObject, count: u32) {
+    assert!(
+        class::JS_IsDomStub(obj),
+        "release_dom_stub_count called on a non-JSDomStub object"
+    );
+    if count == 0 {
+        return;
+    }
+    let cx = current();
+    let count = i32::try_from(count).expect("reference count decrement exceeds i32::MAX");
+    let v = obj_val(obj);
+    let ref_count = q::JS_GetRefCount(v);
+    assert!(
+        count <= ref_count,
+        "releasing {count} references from an object with {ref_count}"
+    );
+    verify::count(v, -i64::from(count));
+    q::JS_FreeValueRTCount(cx.rt, v, count);
+}
+
 pub(crate) fn drain_current_pool() {
     if let Some(cx) = try_current() {
         #[cfg(qjs_pool_stats)]
         pool_stats::task_drained(cx.pool.len());
         cx.drain_pool((0, 0));
     }
+}
+
+/// Drains the whole autorelease pool, then runs a full GC.
+///
+/// This is the minimal version of the test hook: unlike the rebased branch, it does not combine
+/// the drain and GC into one `drain_stats` timing record.
+pub(crate) fn drain_pool_and_gc() {
+    let Some(cx) = try_current() else {
+        return;
+    };
+    cx.drain_pool((0, 0));
+    // SAFETY: `cx` is the live runtime of this thread, and the caller is a JS hook on it.
+    unsafe { JS_GC(cx.as_raw(), root::JS::GCReason::API) };
 }
 
 /// How a value entered the autorelease pool.
